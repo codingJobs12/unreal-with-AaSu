@@ -5,6 +5,8 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "SOTMPlayerBlueprintLibrary.h"
+#include "SOTMPlayerStateSubsystem.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "TimerManager.h"
 
@@ -15,6 +17,7 @@ namespace { constexpr int32 MaxPlayerBindingRetries = 20; }
 void USOTMPlayerHealthBarWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	NormalVisibility = GetVisibility();
 
 	HealthProgressBar = Cast<UProgressBar>(
 		WidgetTree ? WidgetTree->FindWidget(TEXT("ProgressBar_138")) : nullptr);
@@ -26,6 +29,18 @@ void USOTMPlayerHealthBarWidget::NativeConstruct()
 	}
 
 	BindToProductionPlayer();
+
+	BoundPlayerState = USOTMPlayerBlueprintLibrary::GetPlayerStateSubsystem(this);
+	if (BoundPlayerState)
+	{
+		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(
+			this, &ThisClass::HandleInputLocksChanged);
+		BoundPlayerState->OnInputLocksChanged.AddDynamic(
+			this, &ThisClass::HandleInputLocksChanged);
+		HandleInputLocksChanged(
+			BoundPlayerState->HasAnyInputLock(),
+			BoundPlayerState->GetActiveInputLockReasons());
+	}
 }
 
 void USOTMPlayerHealthBarWidget::NativeDestruct()
@@ -40,10 +55,29 @@ void USOTMPlayerHealthBarWidget::NativeDestruct()
 		BoundVitalComponent->OnHealthChanged.RemoveDynamic(
 			this, &ThisClass::HandleHealthChanged);
 	}
+	if (BoundPlayerState)
+	{
+		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(
+			this, &ThisClass::HandleInputLocksChanged);
+	}
 	BoundVitalComponent = nullptr;
+	BoundPlayerState = nullptr;
 	HealthProgressBar = nullptr;
 
 	Super::NativeDestruct();
+}
+
+void USOTMPlayerHealthBarWidget::HandleInputLocksChanged(
+	const bool bInputLocked,
+	TArray<ESOTMInputLockReason> ActiveReasons)
+{
+	(void)bInputLocked;
+	const bool bSuppressHealth = ActiveReasons.Contains(ESOTMInputLockReason::Death) ||
+		ActiveReasons.Contains(ESOTMInputLockReason::Respawn) ||
+		ActiveReasons.Contains(ESOTMInputLockReason::Cinematic) ||
+		ActiveReasons.Contains(ESOTMInputLockReason::JumpScare) ||
+		ActiveReasons.Contains(ESOTMInputLockReason::GameOver);
+	SetVisibility(bSuppressHealth ? ESlateVisibility::Collapsed : NormalVisibility);
 }
 
 void USOTMPlayerHealthBarWidget::BindToProductionPlayer()
