@@ -646,6 +646,7 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	bGameOver = false;
 	bDeathProcessing = false;
 	bLoadedPlayerState = false;
+	bPendingMansionIntro = false;
 	bHasInitializedPlayerHealth = false;
 	bPendingRespawnAfterTravel = false;
 	CheckpointState = FSOTMCheckpointState();
@@ -654,6 +655,13 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	ApplyLoadedStateToBoundPlayer();
 	OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+}
+
+bool USOTMPlayerStateSubsystem::ConsumePendingMansionIntro()
+{
+	const bool bWasPending = bPendingMansionIntro;
+	bPendingMansionIntro = false;
+	return bWasPending;
 }
 
 bool USOTMPlayerStateSubsystem::SynchronizeFromActiveMenuSave(
@@ -677,6 +685,7 @@ bool USOTMPlayerStateSubsystem::SynchronizeFromActiveMenuSave(
 	const bool bRead = ReadStateFromSaveObject(SaveObject);
 	if (bRead)
 	{
+		bPendingMansionIntro = false;
 		bLoadedPlayerState = true;
 		ApplyLoadedStateToBoundPlayer();
 	}
@@ -685,6 +694,7 @@ bool USOTMPlayerStateSubsystem::SynchronizeFromActiveMenuSave(
 		// A newly-created production slot has no SOTM schema yet. This is the
 		// authoritative New Game signal; reset here, never during generic startup.
 		ResetRuntimeStateForNewGame();
+		bPendingMansionIntro = true;
 	}
 
 	LastSynchronizedSaveSlot = SlotName;

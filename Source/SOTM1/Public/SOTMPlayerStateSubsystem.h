@@ -167,6 +167,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SOTM|Player|Save")
 	void ResetRuntimeStateForNewGame();
 
+	/** One-shot signal raised only when Menu System Pro creates a genuinely new story save. */
+	bool ConsumePendingMansionIntro();
+
 	UFUNCTION(BlueprintCallable, Category="SOTM|Player|Debug", meta=(DevelopmentOnly))
 	void SetLivesForDebug(int32 NewLives);
 
@@ -267,6 +270,9 @@ private:
 
 	UPROPERTY(Transient)
 	bool bLoadedPlayerState = false;
+
+	/** New Game route gate. Continue/load must never replay the Mansion introduction. */
+	bool bPendingMansionIntro = false;
 
 	UPROPERTY(Transient)
 	bool bHasInitializedPlayerHealth = false;

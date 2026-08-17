@@ -4,14 +4,18 @@
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
+#include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
+#include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "SOTMPlayerBlueprintLibrary.h"
@@ -23,10 +27,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogSOTMHUD, Log, All);
 namespace
 {
 	const FLinearColor PanelColor(0.012f, 0.018f, 0.032f, 0.88f);
-	const FLinearColor PrimaryTextColor(0.84f, 0.90f, 0.96f, 1.0f);
-	const FLinearColor MutedTextColor(0.50f, 0.62f, 0.72f, 1.0f);
-	const FLinearColor BlueAccent(0.08f, 0.52f, 0.92f, 1.0f);
-	const FLinearColor GoldAccent(1.0f, 0.82f, 0.18f, 1.0f);
+	const FLinearColor PrimaryTextColor(0.93f, 0.90f, 0.85f, 1.0f);
+	const FLinearColor MutedTextColor(0.38f, 0.37f, 0.38f, 1.0f);
+	const FLinearColor PurpleAccent(0.66f, 0.30f, 0.75f, 1.0f);
+	const FLinearColor GoldAccent(0.96f, 0.70f, 0.22f, 1.0f);
+	const FLinearColor RedAccent(0.86f, 0.06f, 0.08f, 1.0f);
 
 	UTextBlock* CreateText(
 		UWidgetTree* Tree,
@@ -179,6 +184,26 @@ void USOTMIngameUIWidget::NativeConstruct()
 		RefreshLives(0, 0, false);
 	}
 
+	BoundObjectiveState = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<USOTMObjectiveSubsystem>() : nullptr;
+	if (BoundObjectiveState)
+	{
+		BoundObjectiveState->OnObjectiveChanged.RemoveDynamic(this, &ThisClass::HandleObjectiveChanged);
+		BoundObjectiveState->OnObjectiveChanged.AddDynamic(this, &ThisClass::HandleObjectiveChanged);
+		RefreshObjectivePresentation(BoundObjectiveState->GetCollectAllForestCoinsObjective());
+	}
+	else
+	{
+		RefreshObjectivePresentation(FSOTMObjectiveData());
+	}
+
+	BoundPhase2World = GetWorld() ? GetWorld()->GetSubsystem<USOTMDemoPhase2WorldSubsystem>() : nullptr;
+	if (BoundPhase2World)
+	{
+		BoundPhase2World->OnCousinWarningChanged.RemoveDynamic(this, &ThisClass::HandleCousinWarningChanged);
+		BoundPhase2World->OnCousinWarningChanged.AddDynamic(this, &ThisClass::HandleCousinWarningChanged);
+	}
+
 #if !UE_BUILD_SHIPPING
 	ActiveDevelopmentHUD = this;
 	if (bPendingObjectivePreview)
@@ -223,6 +248,16 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(this, &ThisClass::HandleInputLocksChanged);
 	}
 	BoundPlayerState = nullptr;
+	if (BoundObjectiveState)
+	{
+		BoundObjectiveState->OnObjectiveChanged.RemoveDynamic(this, &ThisClass::HandleObjectiveChanged);
+	}
+	if (BoundPhase2World)
+	{
+		BoundPhase2World->OnCousinWarningChanged.RemoveDynamic(this, &ThisClass::HandleCousinWarningChanged);
+	}
+	BoundObjectiveState = nullptr;
+	BoundPhase2World = nullptr;
 
 #if !UE_BUILD_SHIPPING
 	if (ActiveDevelopmentHUD.Get() == this)
@@ -249,34 +284,42 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 	}
 
 	ObjectivePanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SOTM_ObjectivePanel"));
-	ObjectivePanel->SetBrushColor(PanelColor);
-	ObjectivePanel->SetPadding(FMargin(18.0f, 14.0f));
+	ObjectivePanel->SetBrushColor(FLinearColor(0.008f, 0.009f, 0.012f, 0.91f));
+	ObjectivePanel->SetPadding(FMargin(22.0f, 18.0f));
 	UVerticalBox* ObjectiveContent = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("SOTM_ObjectiveContent"));
 	ObjectivePanel->SetContent(ObjectiveContent);
 
 	UTextBlock* PanelTitle = CreateText(
 		WidgetTree, TEXT("SOTM_ObjectivePanelTitle"),
-		NSLOCTEXT("SOTM", "ChapterStatus", "CHAPTER STATUS"), 14, BlueAccent);
-	AddVertical(ObjectiveContent, PanelTitle, FMargin(0.0f, 0.0f, 0.0f, 7.0f));
+		NSLOCTEXT("SOTM", "Phase2ObjectivesTitle", "OBJECTIVES"), 25, FLinearColor(0.92f, 0.75f, 0.53f, 1.0f));
+	PanelTitle->SetJustification(ETextJustify::Center);
+	AddVertical(ObjectiveContent, PanelTitle, FMargin(0.0f, 0.0f, 0.0f, 16.0f));
 
 	CurrentObjectiveSection = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("SOTM_CurrentObjectiveSection"));
-	UTextBlock* ObjectiveHeader = CreateText(
-		WidgetTree, TEXT("SOTM_CurrentObjectiveHeader"),
-		NSLOCTEXT("SOTM", "CurrentObjectiveHeader", "CURRENT OBJECTIVE"), 12, MutedTextColor);
 	CurrentObjectiveText = CreateText(
-		WidgetTree, TEXT("SOTM_CurrentObjectiveText"), FText::GetEmpty(), 20, PrimaryTextColor);
+		WidgetTree, TEXT("SOTM_CurrentObjectiveText"), FText::GetEmpty(), 19, PrimaryTextColor);
 	CurrentObjectiveText->SetAutoWrapText(true);
-	CurrentObjectiveText->SetWrapTextAt(340.0f);
-	AddVertical(CurrentObjectiveSection, ObjectiveHeader, FMargin(0.0f));
-	AddVertical(CurrentObjectiveSection, CurrentObjectiveText, FMargin(0.0f, 2.0f, 0.0f, 8.0f));
+	CurrentObjectiveText->SetWrapTextAt(330.0f);
+	ObjectiveProgressText = CreateText(
+		WidgetTree, TEXT("SOTM_ObjectiveProgressText"), FText::GetEmpty(), 18, GoldAccent);
+	ObjectiveProgressText->SetJustification(ETextJustify::Right);
+	AddVertical(CurrentObjectiveSection, CurrentObjectiveText, FMargin(0.0f, 1.0f, 0.0f, 2.0f));
+	AddVertical(CurrentObjectiveSection, ObjectiveProgressText, FMargin(0.0f, 0.0f, 0.0f, 13.0f));
 	CurrentObjectiveSection->SetVisibility(ESlateVisibility::Collapsed);
 	AddVertical(ObjectiveContent, CurrentObjectiveSection, FMargin(0.0f));
 
+	FutureObjectivesText = CreateText(
+		WidgetTree, TEXT("SOTM_FutureObjectivesText"),
+		NSLOCTEXT("SOTM", "Phase2FutureObjectives", "[LOCKED]  Find the Chest\n\n[LOCKED]  Obtain the Gate Key\n\n[LOCKED]  Reach the Gate"),
+		17, MutedTextColor);
+	FutureObjectivesText->SetLineHeightPercentage(1.0f);
+	AddVertical(ObjectiveContent, FutureObjectivesText, FMargin(0.0f, 0.0f, 0.0f, 15.0f));
+
 	CoinCounterText = CreateText(
-		WidgetTree, TEXT("SOTM_CoinCounterText"), FText::GetEmpty(), 19, GoldAccent);
-	AddVertical(ObjectiveContent, CoinCounterText, FMargin(0.0f, 2.0f, 0.0f, 4.0f));
+		WidgetTree, TEXT("SOTM_CoinCounterText"), FText::GetEmpty(), 21, GoldAccent);
+	AddVertical(ObjectiveContent, CoinCounterText, FMargin(0.0f, 7.0f, 0.0f, 4.0f));
 
 	RequiredCoinsSection = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("SOTM_RequiredCoinsSection"));
@@ -300,7 +343,7 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 	UpgradeBarSize->SetHeightOverride(9.0f);
 	UpgradeProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
 		UProgressBar::StaticClass(), TEXT("SOTM_UpgradeProgressBar"));
-	UpgradeProgressBar->SetFillColorAndOpacity(BlueAccent);
+	UpgradeProgressBar->SetFillColorAndOpacity(PurpleAccent);
 	UpgradeBarSize->SetContent(UpgradeProgressBar);
 	UpgradeDetailText = CreateText(
 		WidgetTree, TEXT("SOTM_UpgradeDetailText"), FText::GetEmpty(), 14, PrimaryTextColor);
@@ -320,25 +363,101 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 	MissionTasksContainer->SetVisibility(ESlateVisibility::Collapsed);
 	AddVertical(ObjectiveContent, MissionTasksContainer, FMargin(0.0f));
 
-	if (UCanvasPanelSlot* ObjectiveSlot = RootCanvas->AddChildToCanvas(ObjectivePanel))
+	USizeBox* ObjectiveSize = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("SOTM_ObjectivePanelSize"));
+	ObjectiveSize->SetWidthOverride(410.0f);
+	ObjectiveSize->SetContent(ObjectivePanel);
+	if (UCanvasPanelSlot* ObjectiveSlot = RootCanvas->AddChildToCanvas(ObjectiveSize))
 	{
 		ObjectiveSlot->SetAnchors(FAnchors(0.0f, 0.0f));
 		ObjectiveSlot->SetAlignment(FVector2D(0.0f, 0.0f));
-		ObjectiveSlot->SetPosition(FVector2D(32.0f, 32.0f));
+		ObjectiveSlot->SetPosition(FVector2D(24.0f, 24.0f));
 		ObjectiveSlot->SetAutoSize(true);
 		ObjectiveSlot->SetZOrder(100);
 	}
 
+	TopRightCoinPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_TopRightCoinPanel"));
+	TopRightCoinPanel->SetBrushColor(FLinearColor(0.01f, 0.008f, 0.006f, 0.86f));
+	TopRightCoinPanel->SetPadding(FMargin(18.0f, 8.0f));
+	TopRightCoinText = CreateText(
+		WidgetTree, TEXT("SOTM_TopRightCoinText"), FText::GetEmpty(), 26, GoldAccent);
+	TopRightCoinPanel->SetContent(TopRightCoinText);
+	if (UCanvasPanelSlot* CoinSlot = RootCanvas->AddChildToCanvas(TopRightCoinPanel))
+	{
+		CoinSlot->SetAnchors(FAnchors(1.0f, 0.0f));
+		CoinSlot->SetAlignment(FVector2D(1.0f, 0.0f));
+		CoinSlot->SetPosition(FVector2D(-24.0f, 24.0f));
+		CoinSlot->SetAutoSize(true);
+		CoinSlot->SetZOrder(100);
+	}
+
 	LivesText = CreateText(
-		WidgetTree, TEXT("SOTM_LivesText"), FText::GetEmpty(), 20, PrimaryTextColor);
+		WidgetTree, TEXT("SOTM_LivesText"), FText::GetEmpty(), 20, PurpleAccent);
 	LivesText->SetJustification(ETextJustify::Left);
 	if (UCanvasPanelSlot* LivesSlot = RootCanvas->AddChildToCanvas(LivesText))
 	{
 		LivesSlot->SetAnchors(FAnchors(0.0f, 1.0f));
 		LivesSlot->SetAlignment(FVector2D(0.0f, 1.0f));
-		LivesSlot->SetPosition(FVector2D(36.0f, -34.0f));
+		LivesSlot->SetPosition(FVector2D(28.0f, -34.0f));
 		LivesSlot->SetAutoSize(true);
 		LivesSlot->SetZOrder(100);
+	}
+
+	SpeedBoostPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_SpeedBoostLockedPanel"));
+	SpeedBoostPanel->SetBrushColor(FLinearColor(0.025f, 0.012f, 0.038f, 0.88f));
+	SpeedBoostPanel->SetPadding(FMargin(18.0f, 10.0f));
+	UTextBlock* SpeedText = CreateText(
+		WidgetTree, TEXT("SOTM_SpeedBoostLockedText"),
+		NSLOCTEXT("SOTM", "SpeedBoostLocked", "SPEED BOOST\nLOCKED"), 17, PurpleAccent);
+	SpeedText->SetJustification(ETextJustify::Center);
+	SpeedBoostPanel->SetContent(SpeedText);
+	if (UCanvasPanelSlot* SpeedSlot = RootCanvas->AddChildToCanvas(SpeedBoostPanel))
+	{
+		SpeedSlot->SetAnchors(FAnchors(0.5f, 1.0f));
+		SpeedSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+		SpeedSlot->SetPosition(FVector2D(-255.0f, -24.0f));
+		SpeedSlot->SetAutoSize(true);
+		SpeedSlot->SetZOrder(100);
+	}
+
+	GateKeyPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_GateKeyLockedPanel"));
+	GateKeyPanel->SetBrushColor(FLinearColor(0.018f, 0.012f, 0.022f, 0.88f));
+	GateKeyPanel->SetPadding(FMargin(20.0f, 10.0f));
+	UTextBlock* GateText = CreateText(
+		WidgetTree, TEXT("SOTM_GateKeyLockedText"),
+		NSLOCTEXT("SOTM", "GateKeyNotAcquired", "GATE KEY\nNOT ACQUIRED"), 17, PurpleAccent);
+	GateText->SetJustification(ETextJustify::Center);
+	GateKeyPanel->SetContent(GateText);
+	if (UCanvasPanelSlot* GateSlot = RootCanvas->AddChildToCanvas(GateKeyPanel))
+	{
+		GateSlot->SetAnchors(FAnchors(1.0f, 1.0f));
+		GateSlot->SetAlignment(FVector2D(1.0f, 1.0f));
+		GateSlot->SetPosition(FVector2D(-24.0f, -24.0f));
+		GateSlot->SetAutoSize(true);
+		GateSlot->SetZOrder(100);
+	}
+
+	CousinWarningPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_CousinWarningPanel"));
+	CousinWarningPanel->SetBrushColor(FLinearColor(0.08f, 0.005f, 0.008f, 0.91f));
+	CousinWarningPanel->SetPadding(FMargin(24.0f, 14.0f));
+	UTextBlock* WarningText = CreateText(
+		WidgetTree, TEXT("SOTM_CousinWarningText"),
+		NSLOCTEXT("SOTM", "CousinSpotted", "COUSIN SPOTTED!\nHide or run before it catches you!"),
+		21, RedAccent);
+	WarningText->SetJustification(ETextJustify::Center);
+	CousinWarningPanel->SetContent(WarningText);
+	CousinWarningPanel->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* WarningSlot = RootCanvas->AddChildToCanvas(CousinWarningPanel))
+	{
+		WarningSlot->SetAnchors(FAnchors(1.0f, 0.55f));
+		WarningSlot->SetAlignment(FVector2D(1.0f, 0.5f));
+		WarningSlot->SetPosition(FVector2D(-24.0f, 0.0f));
+		WarningSlot->SetAutoSize(true);
+		WarningSlot->SetZOrder(200);
 	}
 
 	BossPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SOTM_BossPanel"));
@@ -398,6 +517,12 @@ void USOTMIngameUIWidget::RefreshCoinCounter(
 	CoinCounterText->SetText(FText::Format(
 		NSLOCTEXT("SOTM", "CoinCounterFormat", "COINS COLLECTED   {0}"),
 		FText::AsNumber(SafeLifetime)));
+	if (TopRightCoinText)
+	{
+		TopRightCoinText->SetText(FText::Format(
+			NSLOCTEXT("SOTM", "TopRightCoinCounterFormat", "COINS   {0}"),
+			FText::AsNumber(SafeLifetime)));
+	}
 
 	if (bPlayFeedback && bIncreased)
 	{
@@ -405,6 +530,11 @@ void USOTMIngameUIWidget::RefreshCoinCounter(
 		Pulse.Scale = FVector2D(1.10f, 1.10f);
 		CoinCounterText->SetRenderTransform(Pulse);
 		CoinCounterText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.96f, 0.50f, 1.0f)));
+		if (TopRightCoinText)
+		{
+			TopRightCoinText->SetRenderTransform(Pulse);
+			TopRightCoinText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.96f, 0.50f, 1.0f)));
+		}
 		if (UWorld* World = GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(CoinPulseTimerHandle);
@@ -454,6 +584,11 @@ void USOTMIngameUIWidget::FinishCoinPulse()
 		CoinCounterText->SetRenderTransform(FWidgetTransform());
 		CoinCounterText->SetColorAndOpacity(FSlateColor(GoldAccent));
 	}
+	if (TopRightCoinText)
+	{
+		TopRightCoinText->SetRenderTransform(FWidgetTransform());
+		TopRightCoinText->SetColorAndOpacity(FSlateColor(GoldAccent));
+	}
 }
 
 void USOTMIngameUIWidget::FinishLivesPulse()
@@ -461,8 +596,72 @@ void USOTMIngameUIWidget::FinishLivesPulse()
 	if (LivesText)
 	{
 		LivesText->SetRenderTransform(FWidgetTransform());
-		LivesText->SetColorAndOpacity(FSlateColor(PrimaryTextColor));
+		LivesText->SetColorAndOpacity(FSlateColor(PurpleAccent));
 	}
+}
+
+void USOTMIngameUIWidget::HandleObjectiveChanged(const FSOTMObjectiveData Objective)
+{
+	RefreshObjectivePresentation(Objective);
+}
+
+void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData& Objective)
+{
+	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
+	const ESlateVisibility ForestHUDVisibility = bForestObjectiveActive
+		? ESlateVisibility::SelfHitTestInvisible
+		: ESlateVisibility::Collapsed;
+
+	if (ObjectivePanel)
+	{
+		ObjectivePanel->SetVisibility(ForestHUDVisibility);
+	}
+	if (TopRightCoinPanel)
+	{
+		TopRightCoinPanel->SetVisibility(ForestHUDVisibility);
+	}
+	if (SpeedBoostPanel)
+	{
+		SpeedBoostPanel->SetVisibility(ForestHUDVisibility);
+	}
+	if (GateKeyPanel)
+	{
+		GateKeyPanel->SetVisibility(ForestHUDVisibility);
+	}
+	if (CurrentObjectiveSection)
+	{
+		CurrentObjectiveSection->SetVisibility(ForestHUDVisibility);
+	}
+
+	if (!bForestObjectiveActive || !CurrentObjectiveText || !ObjectiveProgressText)
+	{
+		return;
+	}
+
+	const bool bCompleted = Objective.State == ESOTMObjectiveState::Completed;
+	CurrentObjectiveText->SetText(bCompleted
+		? NSLOCTEXT("SOTM", "ForestCoinsComplete", "[COMPLETE]  Collect All Coins")
+		: NSLOCTEXT("SOTM", "ForestCoinsActive", "[ACTIVE]  Collect All Coins"));
+	CurrentObjectiveText->SetColorAndOpacity(FSlateColor(bCompleted ? GoldAccent : PrimaryTextColor));
+	ObjectiveProgressText->SetText(bCompleted
+		? NSLOCTEXT("SOTM", "ForestCoinsCompleteProgress", "330 / 330")
+		: FText::Format(
+			NSLOCTEXT("SOTM", "ForestCoinsProgress", "{0} / {1}"),
+			FText::AsNumber(FMath::Max(0, Objective.CurrentProgress)),
+			FText::AsNumber(USOTMObjectiveSubsystem::TotalForestCoins)));
+}
+
+void USOTMIngameUIWidget::HandleCousinWarningChanged(const bool bVisible)
+{
+	if (!CousinWarningPanel)
+	{
+		return;
+	}
+
+	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
+	CousinWarningPanel->SetVisibility(bVisible && bForestObjectiveActive
+		? ESlateVisibility::SelfHitTestInvisible
+		: ESlateVisibility::Collapsed);
 }
 
 void USOTMIngameUIWidget::SetCurrentObjective(const FText& ObjectiveText)

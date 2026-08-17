@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMIngameUIWidget.generated.h"
 
@@ -9,6 +10,8 @@ class UBorder;
 class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
+class USOTMDemoPhase2WorldSubsystem;
+class USOTMObjectiveSubsystem;
 class USOTMPlayerStateSubsystem;
 
 /**
@@ -83,6 +86,12 @@ private:
 	void HandleLivesChanged(int32 CurrentLives, int32 MaximumLives);
 
 	UFUNCTION()
+	void HandleObjectiveChanged(FSOTMObjectiveData Objective);
+
+	UFUNCTION()
+	void HandleCousinWarningChanged(bool bVisible);
+
+	UFUNCTION()
 	void HandlePlayerDeathStarted(AActor* PlayerActor);
 
 	UFUNCTION()
@@ -97,6 +106,7 @@ private:
 	void EnsureProductionHUD();
 	void RefreshCoinCounter(int32 AvailableCoins, int32 LifetimeCoinsCollected, bool bPlayFeedback);
 	void RefreshLives(int32 CurrentLives, int32 MaximumLives, bool bPlayFeedback);
+	void RefreshObjectivePresentation(const FSOTMObjectiveData& Objective);
 	void RefreshPresentationVisibility();
 	void FinishCoinPulse();
 	void FinishLivesPulse();
@@ -111,10 +121,31 @@ private:
 	TObjectPtr<UTextBlock> CurrentObjectiveText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ObjectiveProgressText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FutureObjectivesText;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> CoinCounterText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> TopRightCoinText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> TopRightCoinPanel;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> LivesText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> SpeedBoostPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> GateKeyPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> CousinWarningPanel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> RequiredCoinsSection;
@@ -151,6 +182,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMPlayerStateSubsystem> BoundPlayerState;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMObjectiveSubsystem> BoundObjectiveState;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMDemoPhase2WorldSubsystem> BoundPhase2World;
 
 	FTimerHandle CoinPulseTimerHandle;
 	FTimerHandle LivesPulseTimerHandle;

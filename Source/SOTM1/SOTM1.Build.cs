@@ -17,6 +17,8 @@ public class SOTM1 : ModuleRules
 			"AIModule",
 			"NavigationSystem",
 			"GameplayTasks",
+			"LevelSequence",
+			"MovieScene",
 			"UMG",
 			"DeveloperSettings"
 		});
