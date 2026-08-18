@@ -27,6 +27,7 @@ namespace SOTMPlayerStatePrivate
 	const FName AvailableCoinsProperty(TEXT("SOTM_AvailableCoins"));
 	const FName LifetimeCoinsCollectedProperty(TEXT("SOTM_LifetimeCoinsCollected"));
 	const FName CollectedCoinIdsProperty(TEXT("SOTM_CollectedCoinIds"));
+	const FString SpeedBoostRecordPrefix(TEXT("SOTM_SPEEDBOOST|"));
 
 	bool GetBoolProperty(const UObject* Object, const FName Name, bool& OutValue)
 	{
@@ -309,6 +310,58 @@ bool USOTMPlayerStateSubsystem::TryCollectCoin(
 			*PersistentCoinId.ToString(EGuidFormats::DigitsWithHyphens));
 	}
 	return true;
+}
+
+ESOTMSpeedBoostPurchaseResult USOTMPlayerStateSubsystem::TryPurchaseSpeedBoost(
+	const int32 UnlockCost,
+	const bool bCoinObjectiveCompleted)
+{
+	if (bSpeedBoostUnlocked || SpeedBoostLevel > 0)
+	{
+		return ESOTMSpeedBoostPurchaseResult::AlreadyOwned;
+	}
+	if (!bCoinObjectiveCompleted)
+	{
+		return ESOTMSpeedBoostPurchaseResult::ObjectiveIncomplete;
+	}
+	if (UnlockCost <= 0)
+	{
+		return ESOTMSpeedBoostPurchaseResult::InvalidCost;
+	}
+	if (AvailableCoins < UnlockCost)
+	{
+		return ESOTMSpeedBoostPurchaseResult::NotEnoughCoins;
+	}
+
+	UObject* Manager = nullptr;
+	USaveGame* SaveObject = nullptr;
+	FString SlotName;
+	if (!GetMenuSaveContext(Manager, SaveObject, SlotName) || SlotName.IsEmpty())
+	{
+		return ESOTMSpeedBoostPurchaseResult::NoActiveSave;
+	}
+
+	const int32 PreviousAvailableCoins = AvailableCoins;
+	AvailableCoins -= UnlockCost;
+	bSpeedBoostUnlocked = true;
+	SpeedBoostLevel = 1;
+
+	// Persist the complete transaction before announcing it. If the production
+	// slot cannot save, roll back every runtime field so a failed click is atomic.
+	if (!SavePlayerStateInternal(TEXT("SpeedBoostPurchase")))
+	{
+		AvailableCoins = PreviousAvailableCoins;
+		bSpeedBoostUnlocked = false;
+		SpeedBoostLevel = 0;
+		return ESOTMSpeedBoostPurchaseResult::SaveFailed;
+	}
+
+	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	UE_LOG(LogTemp, Display,
+		TEXT("SOTM Speed Boost purchased slot=\"%s\" cost=%d available=%d lifetime=%d level=%d"),
+		*SlotName, UnlockCost, AvailableCoins, LifetimeCoinsCollected, SpeedBoostLevel);
+	return ESOTMSpeedBoostPurchaseResult::Success;
 }
 
 bool USOTMPlayerStateSubsystem::IsCoinCollected(const FGuid PersistentCoinId) const
@@ -640,6 +693,8 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	PersistentHealth = FMath::Max(1.0f, Settings->MaximumHealth);
 	AvailableCoins = 0;
 	LifetimeCoinsCollected = 0;
+	bSpeedBoostUnlocked = false;
+	SpeedBoostLevel = 0;
 	CollectedCoinIds.Reset();
 	bCoinStateDirty = false;
 	bPlayerDead = false;
@@ -655,6 +710,7 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	ApplyLoadedStateToBoundPlayer();
 	OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
 }
 
 bool USOTMPlayerStateSubsystem::ConsumePendingMansionIntro()
@@ -719,6 +775,27 @@ void USOTMPlayerStateSubsystem::SetLivesForDebug(const int32 NewLives)
 {
 	CurrentLives = FMath::Clamp(NewLives, 0, MaximumLives);
 	OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
+}
+
+void USOTMPlayerStateSubsystem::SetPhase3ProgressForDebug(
+	const int32 NewAvailableCoins,
+	const int32 NewLifetimeCoins,
+	const bool bUnlockSpeedBoost,
+	const int32 NewSpeedBoostLevel)
+{
+#if UE_BUILD_SHIPPING
+	(void)NewAvailableCoins;
+	(void)NewLifetimeCoins;
+	(void)bUnlockSpeedBoost;
+	(void)NewSpeedBoostLevel;
+#else
+	AvailableCoins = FMath::Max(0, NewAvailableCoins);
+	LifetimeCoinsCollected = FMath::Max(AvailableCoins, NewLifetimeCoins);
+	bSpeedBoostUnlocked = bUnlockSpeedBoost && NewSpeedBoostLevel > 0;
+	SpeedBoostLevel = bSpeedBoostUnlocked ? FMath::Max(1, NewSpeedBoostLevel) : 0;
+	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+#endif
 }
 
 void USOTMPlayerStateSubsystem::HandleHealthChanged(
@@ -1116,6 +1193,13 @@ bool USOTMPlayerStateSubsystem::WriteStateToSaveObject(UObject* SaveObject) cons
 	{
 		SerializedCoinIds.Add(CoinId.ToString(EGuidFormats::DigitsWithHyphens));
 	}
+	// The existing SaveGame Blueprint exposes one versioned persistent string for
+	// stable Coin IDs. Append a namespaced Phase 3 record rather than creating a
+	// second save file or requiring a destructive SaveGame Blueprint reparent.
+	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d|%d"),
+		*SOTMPlayerStatePrivate::SpeedBoostRecordPrefix,
+		bSpeedBoostUnlocked ? 1 : 0,
+		SpeedBoostLevel));
 	const bool bCollectedCoinIdsWritten =
 		SOTMPlayerStatePrivate::SetStringProperty(
 			SaveObject,
@@ -1189,6 +1273,8 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	FTransform LoadedTransform = FTransform::Identity;
 	int32 LoadedAvailableCoins = 0;
 	int32 LoadedLifetimeCoins = 0;
+	bool bLoadedSpeedBoostUnlocked = false;
+	int32 LoadedSpeedBoostLevel = 0;
 	FString LoadedCoinIds;
 
 	SOTMPlayerStatePrivate::GetIntProperty(SaveObject, SOTMPlayerStatePrivate::CurrentLivesProperty, LoadedLives);
@@ -1218,6 +1304,13 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			SOTMPlayerStatePrivate::CollectedCoinIdsProperty,
 			LoadedCoinIds);
 	}
+	// Version 2 had no spending transaction. If an older Blueprint/save omitted
+	// AvailableCoins but retained lifetime progress, migrate that balance once;
+	// version 3 saves never repeat this credit after a purchase.
+	if (SaveVersion == 2 && LoadedAvailableCoins <= 0 && LoadedLifetimeCoins > 0)
+	{
+		LoadedAvailableCoins = LoadedLifetimeCoins;
+	}
 
 	const USOTMPlayerSystemSettings* Settings = GetDefault<USOTMPlayerSystemSettings>();
 	MaximumLives = FMath::Max(1, LoadedMaximumLives);
@@ -1230,6 +1323,17 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	LoadedCoinIds.ParseIntoArrayLines(LoadedCoinIdStrings, true);
 	for (const FString& SerializedId : LoadedCoinIdStrings)
 	{
+		if (SaveVersion >= 3 && SerializedId.StartsWith(SOTMPlayerStatePrivate::SpeedBoostRecordPrefix))
+		{
+			TArray<FString> Fields;
+			SerializedId.ParseIntoArray(Fields, TEXT("|"), false);
+			if (Fields.Num() == 3)
+			{
+				bLoadedSpeedBoostUnlocked = FCString::Atoi(*Fields[1]) != 0;
+				LoadedSpeedBoostLevel = FMath::Max(0, FCString::Atoi(*Fields[2]));
+			}
+			continue;
+		}
 		FGuid CoinId;
 		if (FGuid::Parse(SerializedId, CoinId) && CoinId.IsValid())
 		{
@@ -1240,6 +1344,11 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			UE_LOG(LogTemp, Warning, TEXT("SOTM Coin: ignored invalid collected ID in save: %s"), *SerializedId);
 		}
 	}
+	// Apply ownership only after the namespaced Phase 3 record has been parsed.
+	// Assigning these fields before the loop would always restore the defaults
+	// (locked/level 0) even when the save contained a valid unlock record.
+	bSpeedBoostUnlocked = bLoadedSpeedBoostUnlocked && LoadedSpeedBoostLevel > 0;
+	SpeedBoostLevel = bSpeedBoostUnlocked ? FMath::Max(1, LoadedSpeedBoostLevel) : 0;
 	bCoinStateDirty = false;
 
 	CheckpointState.bIsValid = !LoadedCheckpointId.IsNone() && !LoadedCheckpointMap.IsNone();
@@ -1248,6 +1357,7 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	CheckpointState.RespawnTransform = LoadedTransform;
 	bGameOver = CurrentLives <= 0;
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
 	return true;
 }
 

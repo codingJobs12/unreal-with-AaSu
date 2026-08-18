@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Ability/SOTMSpeedBoostTypes.h"
 #include "SOTMPlayerSystemSettings.h"
 #include "SOTMPlayerStateSubsystem.generated.h"
 
@@ -98,6 +99,18 @@ public:
 	UFUNCTION(BlueprintPure, Category="SOTM|Coin")
 	int32 GetLifetimeCoinsCollected() const { return LifetimeCoinsCollected; }
 
+	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Speed Boost")
+	bool IsSpeedBoostUnlocked() const { return bSpeedBoostUnlocked; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Speed Boost")
+	int32 GetSpeedBoostLevel() const { return SpeedBoostLevel; }
+
+	/** Atomic Phase 3 purchase. Lifetime collection is never reduced. */
+	UFUNCTION(BlueprintCallable, Category="SOTM|Ability|Speed Boost")
+	ESOTMSpeedBoostPurchaseResult TryPurchaseSpeedBoost(
+		int32 UnlockCost,
+		bool bCoinObjectiveCompleted);
+
 	/** Atomic persistent collection transaction. One stable ID may succeed only once. */
 	UFUNCTION(BlueprintCallable, Category="SOTM|Coin")
 	bool TryCollectCoin(FGuid PersistentCoinId, AActor* Collector, int32 CoinValue = 1);
@@ -173,6 +186,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SOTM|Player|Debug", meta=(DevelopmentOnly))
 	void SetLivesForDebug(int32 NewLives);
 
+	UFUNCTION(BlueprintCallable, Category="SOTM|Player|Debug", meta=(DevelopmentOnly))
+	void SetPhase3ProgressForDebug(
+		int32 NewAvailableCoins,
+		int32 NewLifetimeCoins,
+		bool bUnlockSpeedBoost,
+		int32 NewSpeedBoostLevel);
+
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMLivesChangedSignature OnLivesChanged;
 
@@ -181,6 +201,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Coin|Events")
 	FSOTMCoinCollectedSignature OnCoinCollected;
+
+	UPROPERTY(BlueprintAssignable, Category="SOTM|Ability|Events")
+	FSOTMSpeedBoostOwnershipChangedSignature OnSpeedBoostOwnershipChanged;
 
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMPlayerActorSignature OnPlayerDeathStarted;
@@ -197,7 +220,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMInputLocksChangedSignature OnInputLocksChanged;
 
-	static constexpr int32 CurrentSaveVersion = 2;
+	static constexpr int32 CurrentSaveVersion = 3;
 
 private:
 	UFUNCTION()
@@ -246,6 +269,12 @@ private:
 
 	UPROPERTY(Transient)
 	int32 LifetimeCoinsCollected = 0;
+
+	UPROPERTY(Transient)
+	bool bSpeedBoostUnlocked = false;
+
+	UPROPERTY(Transient)
+	int32 SpeedBoostLevel = 0;
 
 	/** Stable identities of placed Coins already collected in this Chapter run. */
 	TSet<FGuid> CollectedCoinIds;

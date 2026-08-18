@@ -14,6 +14,7 @@ public class SOTM1 : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"InputCore",
+			"EnhancedInput",
 			"AIModule",
 			"NavigationSystem",
 			"GameplayTasks",

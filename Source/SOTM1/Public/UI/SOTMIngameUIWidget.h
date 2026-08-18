@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Ability/SOTMSpeedBoostTypes.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMIngameUIWidget.generated.h"
@@ -11,6 +12,7 @@ class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
 class USOTMDemoPhase2WorldSubsystem;
+class USOTMDemoPhase3WorldSubsystem;
 class USOTMObjectiveSubsystem;
 class USOTMPlayerStateSubsystem;
 
@@ -92,6 +94,15 @@ private:
 	void HandleCousinWarningChanged(bool bVisible);
 
 	UFUNCTION()
+	void HandleStationPromptChanged(bool bVisible);
+
+	UFUNCTION()
+	void HandleSpeedBoostStateChanged(
+		ESOTMSpeedBoostRuntimeState State,
+		float RemainingSeconds,
+		float NormalizedRemaining);
+
+	UFUNCTION()
 	void HandlePlayerDeathStarted(AActor* PlayerActor);
 
 	UFUNCTION()
@@ -142,10 +153,19 @@ private:
 	TObjectPtr<UBorder> SpeedBoostPanel;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> SpeedBoostText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> SpeedBoostProgressBar;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UBorder> GateKeyPanel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> CousinWarningPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> StationPromptPanel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVerticalBox> RequiredCoinsSection;
@@ -188,6 +208,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoPhase2WorldSubsystem> BoundPhase2World;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMDemoPhase3WorldSubsystem> BoundPhase3World;
 
 	FTimerHandle CoinPulseTimerHandle;
 	FTimerHandle LivesPulseTimerHandle;

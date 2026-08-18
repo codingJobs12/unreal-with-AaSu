@@ -16,6 +16,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
+#include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "SOTMPlayerBlueprintLibrary.h"
@@ -204,6 +205,16 @@ void USOTMIngameUIWidget::NativeConstruct()
 		BoundPhase2World->OnCousinWarningChanged.AddDynamic(this, &ThisClass::HandleCousinWarningChanged);
 	}
 
+	BoundPhase3World = GetWorld() ? GetWorld()->GetSubsystem<USOTMDemoPhase3WorldSubsystem>() : nullptr;
+	if (BoundPhase3World)
+	{
+		BoundPhase3World->OnStationPromptChanged.RemoveDynamic(this, &ThisClass::HandleStationPromptChanged);
+		BoundPhase3World->OnStationPromptChanged.AddDynamic(this, &ThisClass::HandleStationPromptChanged);
+		BoundPhase3World->OnSpeedBoostStateChanged.RemoveDynamic(this, &ThisClass::HandleSpeedBoostStateChanged);
+		BoundPhase3World->OnSpeedBoostStateChanged.AddDynamic(this, &ThisClass::HandleSpeedBoostStateChanged);
+		HandleSpeedBoostStateChanged(BoundPhase3World->GetSpeedBoostState(), 0.0f, 0.0f);
+	}
+
 #if !UE_BUILD_SHIPPING
 	ActiveDevelopmentHUD = this;
 	if (bPendingObjectivePreview)
@@ -256,8 +267,14 @@ void USOTMIngameUIWidget::NativeDestruct()
 	{
 		BoundPhase2World->OnCousinWarningChanged.RemoveDynamic(this, &ThisClass::HandleCousinWarningChanged);
 	}
+	if (BoundPhase3World)
+	{
+		BoundPhase3World->OnStationPromptChanged.RemoveDynamic(this, &ThisClass::HandleStationPromptChanged);
+		BoundPhase3World->OnSpeedBoostStateChanged.RemoveDynamic(this, &ThisClass::HandleSpeedBoostStateChanged);
+	}
 	BoundObjectiveState = nullptr;
 	BoundPhase2World = nullptr;
+	BoundPhase3World = nullptr;
 
 #if !UE_BUILD_SHIPPING
 	if (ActiveDevelopmentHUD.Get() == this)
@@ -408,11 +425,24 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 		UBorder::StaticClass(), TEXT("SOTM_SpeedBoostLockedPanel"));
 	SpeedBoostPanel->SetBrushColor(FLinearColor(0.025f, 0.012f, 0.038f, 0.88f));
 	SpeedBoostPanel->SetPadding(FMargin(18.0f, 10.0f));
-	UTextBlock* SpeedText = CreateText(
-		WidgetTree, TEXT("SOTM_SpeedBoostLockedText"),
+	UVerticalBox* SpeedContent = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), TEXT("SOTM_SpeedBoostContent"));
+	SpeedBoostText = CreateText(
+		WidgetTree, TEXT("SOTM_SpeedBoostStateText"),
 		NSLOCTEXT("SOTM", "SpeedBoostLocked", "SPEED BOOST\nLOCKED"), 17, PurpleAccent);
-	SpeedText->SetJustification(ETextJustify::Center);
-	SpeedBoostPanel->SetContent(SpeedText);
+	SpeedBoostText->SetJustification(ETextJustify::Center);
+	AddVertical(SpeedContent, SpeedBoostText, FMargin(0.0f));
+	USizeBox* SpeedProgressSize = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("SOTM_SpeedBoostProgressSize"));
+	SpeedProgressSize->SetHeightOverride(6.0f);
+	SpeedProgressSize->SetWidthOverride(120.0f);
+	SpeedBoostProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
+		UProgressBar::StaticClass(), TEXT("SOTM_SpeedBoostProgressBar"));
+	SpeedBoostProgressBar->SetFillColorAndOpacity(PurpleAccent);
+	SpeedBoostProgressBar->SetVisibility(ESlateVisibility::Collapsed);
+	SpeedProgressSize->SetContent(SpeedBoostProgressBar);
+	AddVertical(SpeedContent, SpeedProgressSize, FMargin(0.0f, 5.0f, 0.0f, 0.0f));
+	SpeedBoostPanel->SetContent(SpeedContent);
 	if (UCanvasPanelSlot* SpeedSlot = RootCanvas->AddChildToCanvas(SpeedBoostPanel))
 	{
 		SpeedSlot->SetAnchors(FAnchors(0.5f, 1.0f));
@@ -420,6 +450,26 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 		SpeedSlot->SetPosition(FVector2D(-255.0f, -24.0f));
 		SpeedSlot->SetAutoSize(true);
 		SpeedSlot->SetZOrder(100);
+	}
+
+	StationPromptPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_TimmyStationPrompt"));
+	StationPromptPanel->SetBrushColor(FLinearColor(0.015f, 0.006f, 0.022f, 0.94f));
+	StationPromptPanel->SetPadding(FMargin(24.0f, 12.0f));
+	UTextBlock* StationPromptText = CreateText(
+		WidgetTree, TEXT("SOTM_TimmyStationPromptText"),
+		NSLOCTEXT("SOTM", "TimmyStationPrompt", "[E]  INTERACT\nUPGRADE ABILITIES"),
+		19, PurpleAccent);
+	StationPromptText->SetJustification(ETextJustify::Center);
+	StationPromptPanel->SetContent(StationPromptText);
+	StationPromptPanel->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* PromptSlot = RootCanvas->AddChildToCanvas(StationPromptPanel))
+	{
+		PromptSlot->SetAnchors(FAnchors(0.5f, 0.72f));
+		PromptSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		PromptSlot->SetPosition(FVector2D::ZeroVector);
+		PromptSlot->SetAutoSize(true);
+		PromptSlot->SetZOrder(180);
 	}
 
 	GateKeyPanel = WidgetTree->ConstructWidget<UBorder>(
@@ -521,7 +571,7 @@ void USOTMIngameUIWidget::RefreshCoinCounter(
 	{
 		TopRightCoinText->SetText(FText::Format(
 			NSLOCTEXT("SOTM", "TopRightCoinCounterFormat", "COINS   {0}"),
-			FText::AsNumber(SafeLifetime)));
+			FText::AsNumber(SafeAvailable)));
 	}
 
 	if (bPlayFeedback && bIncreased)
@@ -660,6 +710,72 @@ void USOTMIngameUIWidget::HandleCousinWarningChanged(const bool bVisible)
 
 	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
 	CousinWarningPanel->SetVisibility(bVisible && bForestObjectiveActive
+		? ESlateVisibility::SelfHitTestInvisible
+		: ESlateVisibility::Collapsed);
+}
+
+void USOTMIngameUIWidget::HandleStationPromptChanged(const bool bVisible)
+{
+	if (!StationPromptPanel)
+	{
+		return;
+	}
+	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
+	StationPromptPanel->SetVisibility(bVisible && bForestObjectiveActive
+		? ESlateVisibility::SelfHitTestInvisible
+		: ESlateVisibility::Collapsed);
+}
+
+void USOTMIngameUIWidget::HandleSpeedBoostStateChanged(
+	const ESOTMSpeedBoostRuntimeState State,
+	const float RemainingSeconds,
+	const float NormalizedRemaining)
+{
+	if (!SpeedBoostText || !SpeedBoostPanel || !SpeedBoostProgressBar)
+	{
+		return;
+	}
+
+	FText StateText;
+	FLinearColor StateColor = PurpleAccent;
+	bool bShowProgress = false;
+	FNumberFormattingOptions CountdownFormat;
+	CountdownFormat.SetMaximumFractionalDigits(1);
+	CountdownFormat.SetMinimumFractionalDigits(1);
+	switch (State)
+	{
+	case ESOTMSpeedBoostRuntimeState::Ready:
+		StateText = NSLOCTEXT("SOTM", "SpeedBoostReady", "SPEED BOOST [Q]\nREADY");
+		StateColor = FLinearColor(0.35f, 0.90f, 0.22f, 1.0f);
+		break;
+	case ESOTMSpeedBoostRuntimeState::Active:
+		StateText = FText::Format(
+			NSLOCTEXT("SOTM", "SpeedBoostActive", "SPEED BOOST\nACTIVE  {0}s"),
+			FText::AsNumber(FMath::Max(0.0f, RemainingSeconds), &CountdownFormat));
+		StateColor = FLinearColor(0.20f, 0.62f, 1.0f, 1.0f);
+		bShowProgress = true;
+		break;
+	case ESOTMSpeedBoostRuntimeState::Cooldown:
+		StateText = FText::Format(
+			NSLOCTEXT("SOTM", "SpeedBoostCooldown", "SPEED BOOST\nCOOLDOWN  {0}s"),
+			FText::AsNumber(FMath::Max(0.0f, RemainingSeconds), &CountdownFormat));
+		StateColor = PurpleAccent;
+		bShowProgress = true;
+		break;
+	case ESOTMSpeedBoostRuntimeState::Locked:
+	default:
+		StateText = NSLOCTEXT("SOTM", "SpeedBoostLockedPhase3", "SPEED BOOST\nLOCKED");
+		StateColor = RedAccent;
+		break;
+	}
+
+	SpeedBoostText->SetText(StateText);
+	SpeedBoostText->SetColorAndOpacity(FSlateColor(StateColor));
+	SpeedBoostPanel->SetBrushColor(State == ESOTMSpeedBoostRuntimeState::Active
+		? FLinearColor(0.08f, 0.015f, 0.14f, 0.94f)
+		: FLinearColor(0.025f, 0.012f, 0.038f, 0.88f));
+	SpeedBoostProgressBar->SetPercent(FMath::Clamp(NormalizedRemaining, 0.0f, 1.0f));
+	SpeedBoostProgressBar->SetVisibility(bShowProgress
 		? ESlateVisibility::SelfHitTestInvisible
 		: ESlateVisibility::Collapsed);
 }
