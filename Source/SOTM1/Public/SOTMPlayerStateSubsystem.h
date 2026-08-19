@@ -61,6 +61,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	bool, bInputLocked,
 	TArray<ESOTMInputLockReason>, ActiveReasons);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSOTMSimplePlayerStateSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FSOTMPhase4ProgressChangedSignature,
+	bool, bChestOpened,
+	bool, bHasGateKey,
+	bool, bGateUnlocked,
+	bool, bDemoCompleted);
 
 /**
  * Persistent single-player Chapter state. Lives/checkpoints survive map travel
@@ -104,6 +110,23 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Speed Boost")
 	int32 GetSpeedBoostLevel() const { return SpeedBoostLevel; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
+	bool IsPhase4ChestOpened() const { return bPhase4ChestOpened; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
+	bool HasPhase4GateKey() const { return bPhase4HasGateKey; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
+	bool IsPhase4GateUnlocked() const { return bPhase4GateUnlocked; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
+	bool IsPhase4DemoCompleted() const { return bPhase4DemoCompleted; }
+
+	/** Persistent, atomic Phase 4 transactions. Validation remains in the Objective System. */
+	bool CommitPhase4ChestOpenedAndKey();
+	bool CommitPhase4GateUnlocked();
+	bool CommitPhase4DemoCompleted();
 
 	/** Atomic Phase 3 purchase. Lifetime collection is never reduced. */
 	UFUNCTION(BlueprintCallable, Category="SOTM|Ability|Speed Boost")
@@ -193,6 +216,13 @@ public:
 		bool bUnlockSpeedBoost,
 		int32 NewSpeedBoostLevel);
 
+	UFUNCTION(BlueprintCallable, Category="SOTM|Player|Debug", meta=(DevelopmentOnly))
+	void SetPhase4ProgressForDebug(
+		bool bChestOpened,
+		bool bHasGateKey,
+		bool bGateUnlocked,
+		bool bDemoCompleted);
+
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMLivesChangedSignature OnLivesChanged;
 
@@ -204,6 +234,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Ability|Events")
 	FSOTMSpeedBoostOwnershipChangedSignature OnSpeedBoostOwnershipChanged;
+
+	UPROPERTY(BlueprintAssignable, Category="SOTM|Demo|Phase 4|Events")
+	FSOTMPhase4ProgressChangedSignature OnPhase4ProgressChanged;
 
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMPlayerActorSignature OnPlayerDeathStarted;
@@ -220,7 +253,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMInputLocksChangedSignature OnInputLocksChanged;
 
-	static constexpr int32 CurrentSaveVersion = 3;
+	static constexpr int32 CurrentSaveVersion = 4;
 
 private:
 	UFUNCTION()
@@ -275,6 +308,18 @@ private:
 
 	UPROPERTY(Transient)
 	int32 SpeedBoostLevel = 0;
+
+	UPROPERTY(Transient)
+	bool bPhase4ChestOpened = false;
+
+	UPROPERTY(Transient)
+	bool bPhase4HasGateKey = false;
+
+	UPROPERTY(Transient)
+	bool bPhase4GateUnlocked = false;
+
+	UPROPERTY(Transient)
+	bool bPhase4DemoCompleted = false;
 
 	/** Stable identities of placed Coins already collected in this Chapter run. */
 	TSet<FGuid> CollectedCoinIds;

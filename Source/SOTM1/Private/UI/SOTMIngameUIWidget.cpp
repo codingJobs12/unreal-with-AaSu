@@ -17,6 +17,7 @@
 #include "Engine/World.h"
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
+#include "Demo/SOTMDemoPhase4WorldSubsystem.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "SOTMPlayerBlueprintLibrary.h"
@@ -153,6 +154,7 @@ void USOTMIngameUIWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	EnsureProductionHUD();
+	HideForestHealthPresentation();
 
 	BoundPlayerState = USOTMPlayerBlueprintLibrary::GetPlayerStateSubsystem(this);
 	if (BoundPlayerState)
@@ -169,6 +171,8 @@ void USOTMIngameUIWidget::NativeConstruct()
 		BoundPlayerState->OnGameOver.AddDynamic(this, &ThisClass::HandleGameOver);
 		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(this, &ThisClass::HandleInputLocksChanged);
 		BoundPlayerState->OnInputLocksChanged.AddDynamic(this, &ThisClass::HandleInputLocksChanged);
+		BoundPlayerState->OnPhase4ProgressChanged.RemoveDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
+		BoundPlayerState->OnPhase4ProgressChanged.AddDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
 
 		RefreshCoinCounter(
 			BoundPlayerState->GetAvailableCoins(),
@@ -178,6 +182,9 @@ void USOTMIngameUIWidget::NativeConstruct()
 		HandleInputLocksChanged(
 			BoundPlayerState->HasAnyInputLock(),
 			BoundPlayerState->GetActiveInputLockReasons());
+		HandlePhase4ProgressChanged(
+			BoundPlayerState->IsPhase4ChestOpened(), BoundPlayerState->HasPhase4GateKey(),
+			BoundPlayerState->IsPhase4GateUnlocked(), BoundPlayerState->IsPhase4DemoCompleted());
 	}
 	else
 	{
@@ -215,6 +222,15 @@ void USOTMIngameUIWidget::NativeConstruct()
 		HandleSpeedBoostStateChanged(BoundPhase3World->GetSpeedBoostState(), 0.0f, 0.0f);
 	}
 
+	BoundPhase4World = GetWorld() ? GetWorld()->GetSubsystem<USOTMDemoPhase4WorldSubsystem>() : nullptr;
+	if (BoundPhase4World)
+	{
+		BoundPhase4World->OnPromptChanged.RemoveDynamic(this, &ThisClass::HandlePhase4PromptChanged);
+		BoundPhase4World->OnPromptChanged.AddDynamic(this, &ThisClass::HandlePhase4PromptChanged);
+		BoundPhase4World->OnNotification.RemoveDynamic(this, &ThisClass::HandlePhase4Notification);
+		BoundPhase4World->OnNotification.AddDynamic(this, &ThisClass::HandlePhase4Notification);
+	}
+
 #if !UE_BUILD_SHIPPING
 	ActiveDevelopmentHUD = this;
 	if (bPendingObjectivePreview)
@@ -247,6 +263,7 @@ void USOTMIngameUIWidget::NativeDestruct()
 	{
 		World->GetTimerManager().ClearTimer(CoinPulseTimerHandle);
 		World->GetTimerManager().ClearTimer(LivesPulseTimerHandle);
+		World->GetTimerManager().ClearTimer(Phase4NotificationTimerHandle);
 	}
 
 	if (BoundPlayerState)
@@ -257,6 +274,7 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPlayerState->OnPlayerRespawned.RemoveDynamic(this, &ThisClass::HandlePlayerRespawned);
 		BoundPlayerState->OnGameOver.RemoveDynamic(this, &ThisClass::HandleGameOver);
 		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(this, &ThisClass::HandleInputLocksChanged);
+		BoundPlayerState->OnPhase4ProgressChanged.RemoveDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
 	}
 	BoundPlayerState = nullptr;
 	if (BoundObjectiveState)
@@ -272,9 +290,15 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPhase3World->OnStationPromptChanged.RemoveDynamic(this, &ThisClass::HandleStationPromptChanged);
 		BoundPhase3World->OnSpeedBoostStateChanged.RemoveDynamic(this, &ThisClass::HandleSpeedBoostStateChanged);
 	}
+	if (BoundPhase4World)
+	{
+		BoundPhase4World->OnPromptChanged.RemoveDynamic(this, &ThisClass::HandlePhase4PromptChanged);
+		BoundPhase4World->OnNotification.RemoveDynamic(this, &ThisClass::HandlePhase4Notification);
+	}
 	BoundObjectiveState = nullptr;
 	BoundPhase2World = nullptr;
 	BoundPhase3World = nullptr;
+	BoundPhase4World = nullptr;
 
 #if !UE_BUILD_SHIPPING
 	if (ActiveDevelopmentHUD.Get() == this)
@@ -476,11 +500,11 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 		UBorder::StaticClass(), TEXT("SOTM_GateKeyLockedPanel"));
 	GateKeyPanel->SetBrushColor(FLinearColor(0.018f, 0.012f, 0.022f, 0.88f));
 	GateKeyPanel->SetPadding(FMargin(20.0f, 10.0f));
-	UTextBlock* GateText = CreateText(
+	GateKeyText = CreateText(
 		WidgetTree, TEXT("SOTM_GateKeyLockedText"),
 		NSLOCTEXT("SOTM", "GateKeyNotAcquired", "GATE KEY\nNOT ACQUIRED"), 17, PurpleAccent);
-	GateText->SetJustification(ETextJustify::Center);
-	GateKeyPanel->SetContent(GateText);
+	GateKeyText->SetJustification(ETextJustify::Center);
+	GateKeyPanel->SetContent(GateKeyText);
 	if (UCanvasPanelSlot* GateSlot = RootCanvas->AddChildToCanvas(GateKeyPanel))
 	{
 		GateSlot->SetAnchors(FAnchors(1.0f, 1.0f));
@@ -488,6 +512,48 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 		GateSlot->SetPosition(FVector2D(-24.0f, -24.0f));
 		GateSlot->SetAutoSize(true);
 		GateSlot->SetZOrder(100);
+	}
+
+	Phase4PromptPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_Phase4PromptPanel"));
+	Phase4PromptPanel->SetBrushColor(FLinearColor(0.012f, 0.006f, 0.020f, 0.94f));
+	Phase4PromptPanel->SetPadding(FMargin(24.0f, 13.0f));
+	Phase4PromptText = CreateText(
+		WidgetTree, TEXT("SOTM_Phase4PromptText"), FText::GetEmpty(), 20, GoldAccent);
+	Phase4PromptText->SetJustification(ETextJustify::Center);
+	Phase4PromptPanel->SetContent(Phase4PromptText);
+	Phase4PromptPanel->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* PromptSlot = RootCanvas->AddChildToCanvas(Phase4PromptPanel))
+	{
+		PromptSlot->SetAnchors(FAnchors(0.5f, 1.0f));
+		PromptSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+		PromptSlot->SetPosition(FVector2D(0.0f, -88.0f));
+		PromptSlot->SetAutoSize(true);
+		PromptSlot->SetZOrder(260);
+	}
+
+	Phase4NotificationPanel = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("SOTM_Phase4NotificationPanel"));
+	Phase4NotificationPanel->SetBrushColor(FLinearColor(0.055f, 0.012f, 0.09f, 0.95f));
+	Phase4NotificationPanel->SetPadding(FMargin(34.0f, 20.0f));
+	UVerticalBox* NotificationContent = WidgetTree->ConstructWidget<UVerticalBox>();
+	Phase4NotificationTitle = CreateText(
+		WidgetTree, TEXT("SOTM_Phase4NotificationTitle"), FText::GetEmpty(), 25, GoldAccent);
+	Phase4NotificationTitle->SetJustification(ETextJustify::Center);
+	Phase4NotificationDetail = CreateText(
+		WidgetTree, TEXT("SOTM_Phase4NotificationDetail"), FText::GetEmpty(), 17, PrimaryTextColor);
+	Phase4NotificationDetail->SetJustification(ETextJustify::Center);
+	AddVertical(NotificationContent, Phase4NotificationTitle, FMargin(0.0f, 0.0f, 0.0f, 7.0f));
+	AddVertical(NotificationContent, Phase4NotificationDetail, FMargin(0.0f));
+	Phase4NotificationPanel->SetContent(NotificationContent);
+	Phase4NotificationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* NoticeSlot = RootCanvas->AddChildToCanvas(Phase4NotificationPanel))
+	{
+		NoticeSlot->SetAnchors(FAnchors(0.5f, 0.20f));
+		NoticeSlot->SetAlignment(FVector2D(0.5f, 0.0f));
+		NoticeSlot->SetPosition(FVector2D(0.0f, 0.0f));
+		NoticeSlot->SetAutoSize(true);
+		NoticeSlot->SetZOrder(270);
 	}
 
 	CousinWarningPanel = WidgetTree->ConstructWidget<UBorder>(
@@ -657,6 +723,7 @@ void USOTMIngameUIWidget::HandleObjectiveChanged(const FSOTMObjectiveData Object
 
 void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData& Objective)
 {
+	(void)Objective;
 	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
 	const ESlateVisibility ForestHUDVisibility = bForestObjectiveActive
 		? ESlateVisibility::SelfHitTestInvisible
@@ -688,17 +755,120 @@ void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData&
 		return;
 	}
 
-	const bool bCompleted = Objective.State == ESOTMObjectiveState::Completed;
-	CurrentObjectiveText->SetText(bCompleted
-		? NSLOCTEXT("SOTM", "ForestCoinsComplete", "[COMPLETE]  Collect All Coins")
-		: NSLOCTEXT("SOTM", "ForestCoinsActive", "[ACTIVE]  Collect All Coins"));
-	CurrentObjectiveText->SetColorAndOpacity(FSlateColor(bCompleted ? GoldAccent : PrimaryTextColor));
-	ObjectiveProgressText->SetText(bCompleted
-		? NSLOCTEXT("SOTM", "ForestCoinsCompleteProgress", "330 / 330")
-		: FText::Format(
-			NSLOCTEXT("SOTM", "ForestCoinsProgress", "{0} / {1}"),
-			FText::AsNumber(FMath::Max(0, Objective.CurrentProgress)),
-			FText::AsNumber(USOTMObjectiveSubsystem::TotalForestCoins)));
+	const TArray<FSOTMObjectiveData> Objectives = BoundObjectiveState->GetChapterOneObjectives();
+	const FSOTMObjectiveData Active = BoundObjectiveState->GetActiveChapterOneObjective();
+	if (!Active.ObjectiveId.IsNone())
+	{
+		const bool bCompleted = Active.State == ESOTMObjectiveState::Completed;
+		CurrentObjectiveText->SetText(FText::Format(
+			bCompleted
+				? NSLOCTEXT("SOTM", "ObjectiveCompleteFormat", "[COMPLETE]  {0}")
+				: NSLOCTEXT("SOTM", "ObjectiveActiveFormat", "[ACTIVE]  {0}"),
+			Active.DisplayName));
+		CurrentObjectiveText->SetColorAndOpacity(FSlateColor(bCompleted ? GoldAccent : PrimaryTextColor));
+		ObjectiveProgressText->SetText(Active.ObjectiveId == USOTMObjectiveSubsystem::CollectAllForestCoinsId
+			? FText::Format(NSLOCTEXT("SOTM", "ForestCoinsProgress", "{0} / {1}"),
+				FText::AsNumber(FMath::Max(0, Active.CurrentProgress)),
+				FText::AsNumber(USOTMObjectiveSubsystem::TotalForestCoins))
+			: (bCompleted ? NSLOCTEXT("SOTM", "ObjectiveCompleteShort", "COMPLETE")
+				: NSLOCTEXT("SOTM", "ObjectiveInProgress", "IN PROGRESS")));
+	}
+
+	if (FutureObjectivesText)
+	{
+		FString Rows;
+		for (const FSOTMObjectiveData& Item : Objectives)
+		{
+			if (Item.ObjectiveId == Active.ObjectiveId ||
+				Item.ObjectiveId == USOTMObjectiveSubsystem::CollectAllForestCoinsId ||
+				Item.ObjectiveId == USOTMObjectiveSubsystem::DemoCompleteId)
+			{
+				continue;
+			}
+			const TCHAR* Prefix = Item.State == ESOTMObjectiveState::Completed ? TEXT("[DONE]")
+				: (Item.State == ESOTMObjectiveState::Active ? TEXT("[ACTIVE]") : TEXT("[LOCKED]"));
+			Rows += FString::Printf(TEXT("%s  %s\n\n"), Prefix, *Item.DisplayName.ToString());
+		}
+		Rows.RemoveFromEnd(TEXT("\n\n"));
+		FutureObjectivesText->SetText(FText::FromString(Rows));
+	}
+}
+
+void USOTMIngameUIWidget::HandlePhase4ProgressChanged(
+	const bool bChestOpened,
+	const bool bHasGateKey,
+	const bool bGateUnlocked,
+	const bool bDemoCompleted)
+{
+	(void)bChestOpened;
+	(void)bGateUnlocked;
+	(void)bDemoCompleted;
+	if (GateKeyText)
+	{
+		GateKeyText->SetText(bHasGateKey
+			? NSLOCTEXT("SOTM", "GateKeyAcquiredHUD", "GATE KEY\nACQUIRED")
+			: NSLOCTEXT("SOTM", "GateKeyNotAcquired", "GATE KEY\nNOT ACQUIRED"));
+		GateKeyText->SetColorAndOpacity(FSlateColor(bHasGateKey ? GoldAccent : PurpleAccent));
+	}
+	if (BoundObjectiveState)
+	{
+		RefreshObjectivePresentation(BoundObjectiveState->GetActiveChapterOneObjective());
+	}
+}
+
+void USOTMIngameUIWidget::HandlePhase4PromptChanged(const bool bVisible, const FText PromptText)
+{
+	if (!Phase4PromptPanel || !Phase4PromptText)
+	{
+		return;
+	}
+	Phase4PromptText->SetText(PromptText);
+	Phase4PromptPanel->SetVisibility(bVisible && !PromptText.IsEmptyOrWhitespace()
+		? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+}
+
+void USOTMIngameUIWidget::HandlePhase4Notification(const FText Title, const FText Detail)
+{
+	if (!Phase4NotificationPanel || !Phase4NotificationTitle || !Phase4NotificationDetail)
+	{
+		return;
+	}
+	Phase4NotificationTitle->SetText(Title);
+	Phase4NotificationDetail->SetText(Detail);
+	Phase4NotificationPanel->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(Phase4NotificationTimerHandle);
+		World->GetTimerManager().SetTimer(
+			Phase4NotificationTimerHandle, this, &ThisClass::HidePhase4Notification, 4.0f, false);
+	}
+}
+
+void USOTMIngameUIWidget::HidePhase4Notification()
+{
+	if (Phase4NotificationPanel)
+	{
+		Phase4NotificationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+void USOTMIngameUIWidget::HideForestHealthPresentation()
+{
+	const UWorld* World = GetWorld();
+	if (!World || FName(*UWorld::RemovePIEPrefix(World->GetOutermost()->GetName())) !=
+		FName(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1")))
+	{
+		return;
+	}
+	TArray<UWidget*> Widgets;
+	WidgetTree->GetAllWidgets(Widgets);
+	for (UWidget* Widget : Widgets)
+	{
+		if (Widget && Widget->GetName().Contains(TEXT("Health"), ESearchCase::IgnoreCase))
+		{
+			Widget->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
 }
 
 void USOTMIngameUIWidget::HandleCousinWarningChanged(const bool bVisible)

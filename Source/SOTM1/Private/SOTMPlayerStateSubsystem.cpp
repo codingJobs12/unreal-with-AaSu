@@ -28,6 +28,7 @@ namespace SOTMPlayerStatePrivate
 	const FName LifetimeCoinsCollectedProperty(TEXT("SOTM_LifetimeCoinsCollected"));
 	const FName CollectedCoinIdsProperty(TEXT("SOTM_CollectedCoinIds"));
 	const FString SpeedBoostRecordPrefix(TEXT("SOTM_SPEEDBOOST|"));
+	const FString Phase4RecordPrefix(TEXT("SOTM_PHASE4|"));
 
 	bool GetBoolProperty(const UObject* Object, const FName Name, bool& OutValue)
 	{
@@ -364,6 +365,61 @@ ESOTMSpeedBoostPurchaseResult USOTMPlayerStateSubsystem::TryPurchaseSpeedBoost(
 	return ESOTMSpeedBoostPurchaseResult::Success;
 }
 
+bool USOTMPlayerStateSubsystem::CommitPhase4ChestOpenedAndKey()
+{
+	if (bPhase4ChestOpened || bPhase4HasGateKey)
+	{
+		return bPhase4ChestOpened && bPhase4HasGateKey;
+	}
+	const bool bPreviousChest = bPhase4ChestOpened;
+	const bool bPreviousKey = bPhase4HasGateKey;
+	bPhase4ChestOpened = true;
+	bPhase4HasGateKey = true;
+	if (!SavePlayerStateInternal(TEXT("Phase4ChestOpened")))
+	{
+		bPhase4ChestOpened = bPreviousChest;
+		bPhase4HasGateKey = bPreviousKey;
+		return false;
+	}
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
+	return true;
+}
+
+bool USOTMPlayerStateSubsystem::CommitPhase4GateUnlocked()
+{
+	if (bPhase4GateUnlocked)
+	{
+		return true;
+	}
+	bPhase4GateUnlocked = true;
+	if (!SavePlayerStateInternal(TEXT("Phase4GateUnlocked")))
+	{
+		bPhase4GateUnlocked = false;
+		return false;
+	}
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
+	return true;
+}
+
+bool USOTMPlayerStateSubsystem::CommitPhase4DemoCompleted()
+{
+	if (bPhase4DemoCompleted)
+	{
+		return true;
+	}
+	bPhase4DemoCompleted = true;
+	if (!SavePlayerStateInternal(TEXT("Phase4DemoCompleted")))
+	{
+		bPhase4DemoCompleted = false;
+		return false;
+	}
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
+	return true;
+}
+
 bool USOTMPlayerStateSubsystem::IsCoinCollected(const FGuid PersistentCoinId) const
 {
 	return PersistentCoinId.IsValid() && CollectedCoinIds.Contains(PersistentCoinId);
@@ -695,6 +751,10 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	LifetimeCoinsCollected = 0;
 	bSpeedBoostUnlocked = false;
 	SpeedBoostLevel = 0;
+	bPhase4ChestOpened = false;
+	bPhase4HasGateKey = false;
+	bPhase4GateUnlocked = false;
+	bPhase4DemoCompleted = false;
 	CollectedCoinIds.Reset();
 	bCoinStateDirty = false;
 	bPlayerDead = false;
@@ -711,6 +771,7 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
 	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	OnPhase4ProgressChanged.Broadcast(false, false, false, false);
 }
 
 bool USOTMPlayerStateSubsystem::ConsumePendingMansionIntro()
@@ -795,6 +856,27 @@ void USOTMPlayerStateSubsystem::SetPhase3ProgressForDebug(
 	SpeedBoostLevel = bSpeedBoostUnlocked ? FMath::Max(1, NewSpeedBoostLevel) : 0;
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
 	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+#endif
+}
+
+void USOTMPlayerStateSubsystem::SetPhase4ProgressForDebug(
+	const bool bChestOpened,
+	const bool bHasGateKey,
+	const bool bGateUnlocked,
+	const bool bDemoCompleted)
+{
+#if UE_BUILD_SHIPPING
+	(void)bChestOpened;
+	(void)bHasGateKey;
+	(void)bGateUnlocked;
+	(void)bDemoCompleted;
+#else
+	bPhase4ChestOpened = bChestOpened;
+	bPhase4HasGateKey = bHasGateKey || bChestOpened;
+	bPhase4GateUnlocked = bGateUnlocked;
+	bPhase4DemoCompleted = bDemoCompleted;
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
 #endif
 }
 
@@ -1200,6 +1282,12 @@ bool USOTMPlayerStateSubsystem::WriteStateToSaveObject(UObject* SaveObject) cons
 		*SOTMPlayerStatePrivate::SpeedBoostRecordPrefix,
 		bSpeedBoostUnlocked ? 1 : 0,
 		SpeedBoostLevel));
+	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d|%d|%d|%d"),
+		*SOTMPlayerStatePrivate::Phase4RecordPrefix,
+		bPhase4ChestOpened ? 1 : 0,
+		bPhase4HasGateKey ? 1 : 0,
+		bPhase4GateUnlocked ? 1 : 0,
+		bPhase4DemoCompleted ? 1 : 0));
 	const bool bCollectedCoinIdsWritten =
 		SOTMPlayerStatePrivate::SetStringProperty(
 			SaveObject,
@@ -1275,6 +1363,10 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	int32 LoadedLifetimeCoins = 0;
 	bool bLoadedSpeedBoostUnlocked = false;
 	int32 LoadedSpeedBoostLevel = 0;
+	bool bLoadedPhase4ChestOpened = false;
+	bool bLoadedPhase4HasGateKey = false;
+	bool bLoadedPhase4GateUnlocked = false;
+	bool bLoadedPhase4DemoCompleted = false;
 	FString LoadedCoinIds;
 
 	SOTMPlayerStatePrivate::GetIntProperty(SaveObject, SOTMPlayerStatePrivate::CurrentLivesProperty, LoadedLives);
@@ -1334,6 +1426,19 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			}
 			continue;
 		}
+		if (SaveVersion >= 4 && SerializedId.StartsWith(SOTMPlayerStatePrivate::Phase4RecordPrefix))
+		{
+			TArray<FString> Fields;
+			SerializedId.ParseIntoArray(Fields, TEXT("|"), false);
+			if (Fields.Num() == 5)
+			{
+				bLoadedPhase4ChestOpened = FCString::Atoi(*Fields[1]) != 0;
+				bLoadedPhase4HasGateKey = FCString::Atoi(*Fields[2]) != 0;
+				bLoadedPhase4GateUnlocked = FCString::Atoi(*Fields[3]) != 0;
+				bLoadedPhase4DemoCompleted = FCString::Atoi(*Fields[4]) != 0;
+			}
+			continue;
+		}
 		FGuid CoinId;
 		if (FGuid::Parse(SerializedId, CoinId) && CoinId.IsValid())
 		{
@@ -1349,6 +1454,10 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	// (locked/level 0) even when the save contained a valid unlock record.
 	bSpeedBoostUnlocked = bLoadedSpeedBoostUnlocked && LoadedSpeedBoostLevel > 0;
 	SpeedBoostLevel = bSpeedBoostUnlocked ? FMath::Max(1, LoadedSpeedBoostLevel) : 0;
+	bPhase4ChestOpened = bLoadedPhase4ChestOpened;
+	bPhase4HasGateKey = bLoadedPhase4HasGateKey || bPhase4ChestOpened;
+	bPhase4GateUnlocked = bLoadedPhase4GateUnlocked;
+	bPhase4DemoCompleted = bLoadedPhase4DemoCompleted;
 	bCoinStateDirty = false;
 
 	CheckpointState.bIsValid = !LoadedCheckpointId.IsNone() && !LoadedCheckpointMap.IsNone();
@@ -1358,6 +1467,8 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bGameOver = CurrentLives <= 0;
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
 	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
 	return true;
 }
 

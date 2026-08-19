@@ -13,6 +13,7 @@ class UTextBlock;
 class UVerticalBox;
 class USOTMDemoPhase2WorldSubsystem;
 class USOTMDemoPhase3WorldSubsystem;
+class USOTMDemoPhase4WorldSubsystem;
 class USOTMObjectiveSubsystem;
 class USOTMPlayerStateSubsystem;
 
@@ -103,6 +104,19 @@ private:
 		float NormalizedRemaining);
 
 	UFUNCTION()
+	void HandlePhase4ProgressChanged(
+		bool bChestOpened,
+		bool bHasGateKey,
+		bool bGateUnlocked,
+		bool bDemoCompleted);
+
+	UFUNCTION()
+	void HandlePhase4PromptChanged(bool bVisible, FText PromptText);
+
+	UFUNCTION()
+	void HandlePhase4Notification(FText Title, FText Detail);
+
+	UFUNCTION()
 	void HandlePlayerDeathStarted(AActor* PlayerActor);
 
 	UFUNCTION()
@@ -121,6 +135,8 @@ private:
 	void RefreshPresentationVisibility();
 	void FinishCoinPulse();
 	void FinishLivesPulse();
+	void HidePhase4Notification();
+	void HideForestHealthPresentation();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> ObjectivePanel;
@@ -160,6 +176,24 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> GateKeyPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> GateKeyText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> Phase4PromptPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Phase4PromptText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> Phase4NotificationPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Phase4NotificationTitle;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Phase4NotificationDetail;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> CousinWarningPanel;
@@ -212,8 +246,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoPhase3WorldSubsystem> BoundPhase3World;
 
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMDemoPhase4WorldSubsystem> BoundPhase4World;
+
 	FTimerHandle CoinPulseTimerHandle;
 	FTimerHandle LivesPulseTimerHandle;
+	FTimerHandle Phase4NotificationTimerHandle;
 	int32 DisplayedAvailableCoins = INDEX_NONE;
 	int32 DisplayedLives = INDEX_NONE;
 	bool bHUDPresentationRequested = true;

@@ -313,6 +313,7 @@ void USOTMDemoPhase2WorldSubsystem::BeginDevelopmentAcceptanceRoute()
 		DevelopmentCoinRoute.SetNum(5);
 	}
 	DevelopmentCoinRouteIndex = 0;
+	bDevelopmentAcceptanceCatchObserved = false;
 
 	UE_LOG(LogSOTMPhase2, Display,
 		TEXT("[Phase2Acceptance] START map=%s naturalCoinRoute=%d cousins=%d"),
@@ -447,7 +448,8 @@ void USOTMDemoPhase2WorldSubsystem::PositionCousinForDevelopmentEncounter()
 			GetWorld()->GetTimerManager().SetTimer(CatchFallbackTimer,
 				FTimerDelegate::CreateWeakLambda(this, [this, WeakCousin, WeakPlayer]
 				{
-					if (!bCatchActive && WeakCousin.IsValid() && WeakPlayer.IsValid())
+					if (!bCatchActive && !bDevelopmentAcceptanceCatchObserved &&
+						WeakCousin.IsValid() && WeakPlayer.IsValid())
 					{
 						UE_LOG(LogSOTMPhase2, Warning,
 							TEXT("[Phase2Acceptance] Perception/nav did not begin catch in the timed window; invoking the public catch gate to verify cinematic/death integration."));
@@ -637,6 +639,9 @@ bool USOTMDemoPhase2WorldSubsystem::TryStartCousinCatch(
 
 	bCatchActive = true;
 	bCatchImpactApplied = false;
+#if !UE_BUILD_SHIPPING
+	bDevelopmentAcceptanceCatchObserved = true;
+#endif
 	CatchingCousin = Cousin;
 	CaughtPlayer = PlayerActor;
 	HideCousinWarning();

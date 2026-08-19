@@ -106,6 +106,7 @@ private:
 #if !UE_BUILD_SHIPPING
 	TArray<TWeakObjectPtr<ASOTMCoinPickup>> DevelopmentCoinRoute;
 	int32 DevelopmentCoinRouteIndex = 0;
+	bool bDevelopmentAcceptanceCatchObserved = false;
 	FTimerHandle DevelopmentCoinTimer;
 #endif
 };
