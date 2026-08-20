@@ -6,6 +6,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Engine/Engine.h"
@@ -19,6 +20,8 @@
 #include "LevelSequence.h"
 #include "LevelSequenceActor.h"
 #include "LevelSequencePlayer.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
@@ -37,6 +40,19 @@ namespace SOTMDemoPhase1Private
 	const TCHAR* IntroSequence = TEXT("/Game/Cinematics/LS_SOTM_MansionIntro.LS_SOTM_MansionIntro");
 	const TCHAR* IsabelMontage = TEXT("/Game/AI/AM_Isabel_JumpScare_Phase3.AM_Isabel_JumpScare_Phase3");
 	const TCHAR* IsabelScream = TEXT("/Game/AI/Nightmare_scream_jumpscare_SFX.Nightmare_scream_jumpscare_SFX");
+	const TCHAR* MansionAmbience = TEXT("/Game/Horror_Music_Vol1/Cue/Abyssal_Cue.Abyssal_Cue");
+	const TCHAR* KnockoutImpact = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_KnockoutImpact.SFX_TEMP_KnockoutImpact");
+	const TCHAR* DragFootsteps = TEXT("/Game/footsteps.footsteps");
+
+	const TCHAR* TimmyMansion001 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Mansion_001.VO_TEMP_Timmy_Mansion_001");
+	const TCHAR* TimmyMansion002 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Mansion_002.VO_TEMP_Timmy_Mansion_002");
+	const TCHAR* TimmyMansion003 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Mansion_003.VO_TEMP_Timmy_Mansion_003");
+	const TCHAR* IsabellaMansion001 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Isabella_Mansion_001.VO_TEMP_Isabella_Mansion_001");
+	const TCHAR* IsabellaMansion002 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Isabella_Mansion_002.VO_TEMP_Isabella_Mansion_002");
+	const TCHAR* IsabellaMansion003 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Isabella_Mansion_003.VO_TEMP_Isabella_Mansion_003");
+	const TCHAR* IsabellaMansion004 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Isabella_Mansion_004.VO_TEMP_Isabella_Mansion_004");
+	const TCHAR* TimmyForest001 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Forest_001.VO_TEMP_Timmy_Forest_001");
+	const TCHAR* TimmyForest002 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Forest_002.VO_TEMP_Timmy_Forest_002");
 
 	AActor* FindActor(UWorld* World, const FString& Needle)
 	{
@@ -184,10 +200,21 @@ void USOTMDemoPhase1WorldSubsystem::TryBeginMansionIntro()
 	if (!State || !PC || !PC->GetPawn()) return;
 
 	World->GetTimerManager().ClearTimer(IntroStartTimer);
-	if (!State->ConsumePendingMansionIntro())
+	const bool bPendingIntro = State->ConsumePendingMansionIntro();
+#if !UE_BUILD_SHIPPING
+	const bool bForcedTemporaryAudioAcceptance =
+		FParse::Param(FCommandLine::Get(), TEXT("SOTMTempAudioAcceptance"));
+#else
+	const bool bForcedTemporaryAudioAcceptance = false;
+#endif
+	if (!bPendingIntro && !bForcedTemporaryAudioAcceptance)
 	{
 		UE_LOG(LogTemp, Display, TEXT("SOTM Demo Phase 1: Continue/direct Mansion entry; intro not replayed."));
 		return;
+	}
+	if (bForcedTemporaryAudioAcceptance)
+	{
+		UE_LOG(LogTemp, Display, TEXT("SOTM TEMPORARY AUDIO ACCEPTANCE: forcing Mansion intro in non-Shipping build."));
 	}
 	bIntroRequested = true;
 	BeginMansionIntro(PC, State);
@@ -225,32 +252,43 @@ void USOTMDemoPhase1WorldSubsystem::BeginMansionIntro(APlayerController* PC, USO
 		IntroSequenceActor = CreatedSequenceActor;
 		if (IntroSequencePlayer) IntroSequencePlayer->Play();
 	}
+	if (USoundBase* Ambience = LoadObject<USoundBase>(nullptr, SOTMDemoPhase1Private::MansionAmbience))
+	{
+		MansionAmbienceAudio = UGameplayStatics::SpawnSound2D(
+			this, Ambience, 0.06f, 1.0f, 0.0f, nullptr, false, false);
+		if (MansionAmbienceAudio)
+		{
+			MansionAmbienceAudio->FadeIn(1.2f, 0.06f);
+		}
+	}
 
-	PresentTimmyOpening();
 	FrameActorWithCinematicCamera(TimmyActor.Get());
-	World->GetTimerManager().SetTimer(TimmyWarningTimer, this, &ThisClass::PresentTimmyWarning, 5.0f, false);
-	World->GetTimerManager().SetTimer(IsabelArrivalTimer, this, &ThisClass::PresentIsabelArrival, 9.0f, false);
-	World->GetTimerManager().SetTimer(KnockoutTimer, this, &ThisClass::PresentKnockout, 12.0f, false);
-	World->GetTimerManager().SetTimer(DraggingTimer, this, &ThisClass::PresentDragging, 14.0f, false);
-	World->GetTimerManager().SetTimer(FinishTimer, this, &ThisClass::FinishMansionIntro, 21.5f, false);
-	UE_LOG(LogTemp, Display, TEXT("SOTM Demo Phase 1: Mansion intro started; cinematic lock held."));
+	IntroDialogueStep = 0;
+	PlayIntroDialogueStep();
+	UE_LOG(LogTemp, Display,
+		TEXT("SOTM Demo Phase 1: Mansion intro started with audio-duration-driven TEMPORARY PLACEHOLDER VO; cinematic lock held."));
 }
 
 void USOTMDemoPhase1WorldSubsystem::PresentTimmyOpening()
 {
 	SetSubtitle(NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
-		NSLOCTEXT("SOTM", "TimmyIntro1", "Hello. I'm Timmy Bottom Smith. You need to listen carefully."));
+		NSLOCTEXT("SOTM", "TimmyIntro1", "Hi I’m Timmy Bottom smith it’s nice to meet you mage I’m so glad you came. Listen if you want your powers back you need to go that forest and get it. She’s been waiting for you. Isabella. She took everything from you… even your powers and there’s only one way back good luck."));
 }
 
 void USOTMDemoPhase1WorldSubsystem::PresentTimmyWarning()
 {
 	SetSubtitle(NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
-		NSLOCTEXT("SOTM", "TimmyIntro2", "Your powers were stolen... but you can get them back. Just not in here."));
+		NSLOCTEXT("SOTM", "TimmyIntro2", "But listen… you can get them back. Just not in here."));
+}
+
+void USOTMDemoPhase1WorldSubsystem::PresentTimmyDanger()
+{
+	SetSubtitle(NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+		NSLOCTEXT("SOTM", "TimmyWarning", "Oh no… she’s coming—"));
 }
 
 void USOTMDemoPhase1WorldSubsystem::PresentIsabelArrival()
 {
-	SetSubtitle(NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), NSLOCTEXT("SOTM", "TimmyWarning", "Oh no... she's coming—"));
 	AActor* Isabel = IsabelActor.Get();
 	if (!Isabel) return;
 	Isabel->SetActorHiddenInGame(false);
@@ -269,8 +307,11 @@ void USOTMDemoPhase1WorldSubsystem::PresentIsabelArrival()
 
 void USOTMDemoPhase1WorldSubsystem::PresentKnockout()
 {
-	SetSubtitle(NSLOCTEXT("SOTM", "IsabelName", "ISABELLA"),
-		NSLOCTEXT("SOTM", "IsabelKnockout", "You were never meant to keep those gifts."));
+	SetSubtitle(FText::GetEmpty(), FText::GetEmpty());
+	if (USoundBase* Impact = LoadObject<USoundBase>(nullptr, SOTMDemoPhase1Private::KnockoutImpact))
+	{
+		UGameplayStatics::PlaySound2D(this, Impact, 0.75f);
+	}
 	if (USoundBase* Scream = LoadObject<USoundBase>(nullptr, SOTMDemoPhase1Private::IsabelScream))
 	{
 		UGameplayStatics::PlaySound2D(this, Scream, 0.75f);
@@ -280,21 +321,28 @@ void USOTMDemoPhase1WorldSubsystem::PresentKnockout()
 	{
 		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 0.65f, FLinearColor::Black, false, true);
 	}
+	if (MansionAmbienceAudio)
+	{
+		MansionAmbienceAudio->FadeOut(0.45f, 0.0f);
+	}
 	UE_LOG(LogTemp, Display, TEXT("SOTM Demo Phase 1: scripted zero-damage knockout presented."));
 }
 
 void USOTMDemoPhase1WorldSubsystem::PresentDragging()
 {
-	SetSubtitle(FText::GetEmpty(), NSLOCTEXT("SOTM", "Dragging", "[Footsteps drag you through the darkness...]"));
+	if (USoundBase* Footsteps = LoadObject<USoundBase>(nullptr, SOTMDemoPhase1Private::DragFootsteps))
+	{
+		UGameplayStatics::PlaySound2D(this, Footsteps, 0.28f, 0.78f);
+	}
 	if (APlayerController* PC = IntroPlayerController.Get(); PC && PC->PlayerCameraManager)
 	{
-		PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 1.0f, FLinearColor::Black, false, true);
+		PC->PlayerCameraManager->StartCameraFade(1.0f, 0.82f, 1.0f, FLinearColor::Black, false, true);
 	}
 }
 
 void USOTMDemoPhase1WorldSubsystem::FinishMansionIntro()
 {
-	SetSubtitle(FText::GetEmpty(), NSLOCTEXT("SOTM", "ForestArrival", "The forest waits."));
+	SetSubtitle(FText::GetEmpty(), FText::GetEmpty());
 	if (APlayerController* PC = IntroPlayerController.Get(); PC && PC->PlayerCameraManager)
 	{
 		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 0.55f, FLinearColor::Black, false, true);
@@ -307,6 +355,123 @@ void USOTMDemoPhase1WorldSubsystem::FinishMansionIntro()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(TravelTimer, this, &ThisClass::TravelToForest, 0.60f, false);
+	}
+}
+
+void USOTMDemoPhase1WorldSubsystem::PlayIntroDialogueStep()
+{
+	switch (IntroDialogueStep)
+	{
+	case 0:
+		PresentTimmyOpening();
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion001,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+		break;
+	case 1:
+		PresentTimmyWarning();
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion002,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+		break;
+	case 2:
+		PresentTimmyDanger();
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion003,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+		break;
+	case 3:
+		PresentIsabelArrival();
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::IsabellaMansion001,
+			NSLOCTEXT("SOTM", "IsabelName", "ISABELLA"),
+			NSLOCTEXT("SOTM", "IsabellaIntro1", "I knew you’d come back…"));
+		break;
+	case 4:
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::IsabellaMansion002,
+			NSLOCTEXT("SOTM", "IsabelName", "ISABELLA"),
+			NSLOCTEXT("SOTM", "IsabellaIntro2", "You always do."));
+		break;
+	case 5:
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::IsabellaMansion003,
+			NSLOCTEXT("SOTM", "IsabelName", "ISABELLA"),
+			NSLOCTEXT("SOTM", "IsabellaIntro3", "No speed. No lightning. You’re mine again."));
+		break;
+	case 6:
+		PresentKnockout();
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(DialogueAdvanceTimer, this, &ThisClass::AdvanceIntroDialogue, 0.85f, false);
+		}
+		break;
+	case 7:
+		PresentDragging();
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::IsabellaMansion004,
+			NSLOCTEXT("SOTM", "IsabelName", "ISABELLA"),
+			NSLOCTEXT("SOTM", "IsabellaDrag", "If you want to run so bad… let’s see how far you get."));
+		break;
+	case 8:
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest001,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyForest1", "You’re in her Forest Domain… the only place you can regain your powers."));
+		break;
+	case 9:
+		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest002,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyForest2", "Collect those. They hold pieces of your speed and lightning."));
+		break;
+	default:
+		FinishMansionIntro();
+		break;
+	}
+}
+
+void USOTMDemoPhase1WorldSubsystem::AdvanceIntroDialogue()
+{
+	++IntroDialogueStep;
+	PlayIntroDialogueStep();
+}
+
+void USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogue(
+	const TCHAR* SoundPath,
+	const FText& Speaker,
+	const FText& Line)
+{
+	SetSubtitle(Speaker, Line);
+	USoundBase* Dialogue = LoadObject<USoundBase>(nullptr, SoundPath);
+	if (MansionAmbienceAudio)
+	{
+		MansionAmbienceAudio->SetVolumeMultiplier(0.035f);
+	}
+	if (Dialogue)
+	{
+		ActiveDialogueAudio = UGameplayStatics::SpawnSound2D(
+			this, Dialogue, 1.0f, 1.0f, 0.0f, nullptr, false, true);
+	}
+	if (ActiveDialogueAudio)
+	{
+		ActiveDialogueAudio->OnAudioFinished.AddUniqueDynamic(this, &ThisClass::HandleTemporaryDialogueFinished);
+		UE_LOG(LogTemp, Display, TEXT("SOTM TEMPORARY PLACEHOLDER VO: playing %s duration=%.2fs subtitle=%s"),
+			SoundPath, Dialogue->GetDuration(), *Line.ToString());
+		return;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("SOTM TEMPORARY PLACEHOLDER VO unavailable: %s"), SoundPath);
+	if (UWorld* World = GetWorld())
+	{
+		const float FallbackDelay = Dialogue ? FMath::Max(0.10f, Dialogue->GetDuration()) : 0.75f;
+		World->GetTimerManager().SetTimer(
+			DialogueAdvanceTimer, this, &ThisClass::AdvanceIntroDialogue, FallbackDelay, false);
+	}
+}
+
+void USOTMDemoPhase1WorldSubsystem::HandleTemporaryDialogueFinished()
+{
+	if (ActiveDialogueAudio)
+	{
+		ActiveDialogueAudio->OnAudioFinished.RemoveAll(this);
+	}
+	ActiveDialogueAudio = nullptr;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			DialogueAdvanceTimer, this, &ThisClass::AdvanceIntroDialogue, 0.22f, false);
 	}
 }
 
@@ -413,6 +578,17 @@ void USOTMDemoPhase1WorldSubsystem::StopIsabelGameplayLogic(AActor* Isabel) cons
 
 void USOTMDemoPhase1WorldSubsystem::CleanupIntro(const bool bRestoreCameraFade)
 {
+	if (ActiveDialogueAudio)
+	{
+		ActiveDialogueAudio->OnAudioFinished.RemoveAll(this);
+		ActiveDialogueAudio->Stop();
+		ActiveDialogueAudio = nullptr;
+	}
+	if (MansionAmbienceAudio)
+	{
+		MansionAmbienceAudio->Stop();
+		MansionAmbienceAudio = nullptr;
+	}
 	if (IntroSequencePlayer) IntroSequencePlayer->Stop();
 	if (USOTMPlayerStateSubsystem* State = IntroPlayerState.Get(); State && bCinematicLockHeld)
 	{

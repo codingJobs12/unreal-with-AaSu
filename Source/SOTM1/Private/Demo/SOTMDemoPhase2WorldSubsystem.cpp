@@ -8,6 +8,7 @@
 #include "BrainComponent.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Components/AudioComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Coin/SOTMCoinPickup.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -27,10 +28,15 @@
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "Sound/SoundBase.h"
+#include "Styling/CoreStyle.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
 #include "UI/SOTMIngameUIWidget.h"
 #include "UObject/UObjectIterator.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSOTMPhase2, Log, All);
 
@@ -39,6 +45,37 @@ namespace SOTMDemoPhase2Private
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* CatchMontage = TEXT("/Game/AI/AS_CruelDoll_Attack03_Montage.AS_CruelDoll_Attack03_Montage");
 	const TCHAR* CatchScream = TEXT("/Game/AI/Nightmare_scream_jumpscare_SFX.Nightmare_scream_jumpscare_SFX");
+	const TCHAR* RespawnSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Respawn.SFX_TEMP_Respawn");
+	const TCHAR* CousinDetectVoices[] =
+	{
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Detect_001.VO_TEMP_Cousin_Detect_001"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Detect_002.VO_TEMP_Cousin_Detect_002"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Detect_003.VO_TEMP_Cousin_Detect_003"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Detect_004.VO_TEMP_Cousin_Detect_004")
+	};
+	const TCHAR* CousinDetectLines[] =
+	{
+		TEXT("FOUND YOU!"),
+		TEXT("FRESH MEAT!"),
+		TEXT("SISTER!"),
+		TEXT("HE’S HERE!")
+	};
+	const TCHAR* CousinWhisperVoices[] =
+	{
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Whisper_001.VO_TEMP_Cousin_Whisper_001"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Whisper_002.VO_TEMP_Cousin_Whisper_002"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Whisper_003.VO_TEMP_Cousin_Whisper_003"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Whisper_004.VO_TEMP_Cousin_Whisper_004"),
+		TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Cousin_Whisper_005.VO_TEMP_Cousin_Whisper_005")
+	};
+	const TCHAR* CousinWhisperLines[] =
+	{
+		TEXT("He’s back…"),
+		TEXT("He can’t escape…"),
+		TEXT("Sister wants him…"),
+		TEXT("Let’s play chase…"),
+		TEXT("RUN RUN RUN!")
+	};
 	constexpr int32 ProductionCousinCount = 8;
 }
 
@@ -94,6 +131,13 @@ void USOTMDemoPhase2WorldSubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
+	if (ActiveCousinVoice)
+	{
+		ActiveCousinVoice->OnAudioFinished.RemoveAll(this);
+		ActiveCousinVoice->Stop();
+		ActiveCousinVoice = nullptr;
+	}
+	RemoveCousinSubtitleOverlay();
 	RestorePlayerCamera();
 	DestroyCatchCamera();
 	if (Phase2CreatedHUD)
@@ -113,6 +157,7 @@ FName USOTMDemoPhase2WorldSubsystem::GetMapPackageName(const UWorld* World)
 
 void USOTMDemoPhase2WorldSubsystem::InitializeForestPhase2()
 {
+	NormalizeForestAudioMix();
 	EnsureForestGameplayHUD();
 	TArray<FTransform> CandidateTransforms;
 	DisableLegacyForestEnemies(CandidateTransforms);
@@ -120,6 +165,7 @@ void USOTMDemoPhase2WorldSubsystem::InitializeForestPhase2()
 	UE_LOG(LogSOTMPhase2, Display,
 		TEXT("Phase 2 Forest initialized: legacy normal enemies disabled=%d production cousins=%d."),
 		CandidateTransforms.Num(), SpawnedCousins.Num());
+	ScheduleNextCousinWhisper();
 
 #if !UE_BUILD_SHIPPING
 	if (FParse::Param(FCommandLine::Get(), TEXT("SOTMPhase2Persistence")))
@@ -139,6 +185,181 @@ void USOTMDemoPhase2WorldSubsystem::InitializeForestPhase2()
 		BeginDevelopmentAcceptanceRoute();
 	}
 #endif
+}
+
+void USOTMDemoPhase2WorldSubsystem::NormalizeForestAudioMix()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	int32 Adjusted = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		TInlineComponentArray<UAudioComponent*> Components(*It);
+		for (UAudioComponent* Audio : Components)
+		{
+			USoundBase* Sound = Audio ? Audio->Sound : nullptr;
+			if (!Sound)
+			{
+				continue;
+			}
+			const FString Path = Sound->GetPathName();
+			float TargetVolume = -1.0f;
+			if (Path.Contains(TEXT("horrorambiance3"), ESearchCase::IgnoreCase)) TargetVolume = 0.18f;
+			else if (Path.Contains(TEXT("Whistling_Wind"), ESearchCase::IgnoreCase)) TargetVolume = 0.18f;
+			else if (Path.Contains(TEXT("SinisterWhispers"), ESearchCase::IgnoreCase)) TargetVolume = 0.16f;
+			else if (Path.Contains(TEXT("DarkDescent"), ESearchCase::IgnoreCase)) TargetVolume = 0.12f;
+			else if (Path.Contains(TEXT("DreadfulLullaby"), ESearchCase::IgnoreCase)) TargetVolume = 0.10f;
+			else if (Path.Contains(TEXT("Ambient_Birds_01"), ESearchCase::IgnoreCase)) TargetVolume = 0.25f;
+			if (TargetVolume >= 0.0f)
+			{
+				Audio->SetVolumeMultiplier(TargetVolume);
+				++Adjusted;
+			}
+		}
+	}
+	UE_LOG(LogSOTMPhase2, Display,
+		TEXT("Temporary audio pass normalized %d existing Forest ambience/music components; no map asset was resaved."), Adjusted);
+}
+
+void USOTMDemoPhase2WorldSubsystem::ScheduleNextCousinWhisper()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			CousinWhisperTimer, this, &ThisClass::PlayOccasionalCousinWhisper,
+			FMath::FRandRange(12.0f, 20.0f), false);
+	}
+}
+
+void USOTMDemoPhase2WorldSubsystem::PlayOccasionalCousinWhisper()
+{
+	if (!bCatchActive && !SpawnedCousins.IsEmpty())
+	{
+		const int32 CousinIndex = FMath::RandRange(0, SpawnedCousins.Num() - 1);
+		const int32 VoiceIndex = FMath::RandRange(0, UE_ARRAY_COUNT(SOTMDemoPhase2Private::CousinWhisperVoices) - 1);
+		if (ASOTMCousinCharacter* Cousin = SpawnedCousins[CousinIndex])
+		{
+			PlayTemporaryCousinVoice(
+				SOTMDemoPhase2Private::CousinWhisperVoices[VoiceIndex],
+				FText::FromString(SOTMDemoPhase2Private::CousinWhisperLines[VoiceIndex]),
+				Cousin->GetActorLocation(), 0.24f);
+		}
+	}
+	ScheduleNextCousinWhisper();
+}
+
+void USOTMDemoPhase2WorldSubsystem::PlayTemporaryCousinVoice(
+	const TCHAR* SoundPath,
+	const FText& Line,
+	const FVector& Location,
+	const float Volume)
+{
+	USoundBase* Voice = LoadObject<USoundBase>(nullptr, SoundPath);
+	if (!Voice)
+	{
+		UE_LOG(LogSOTMPhase2, Error, TEXT("TEMPORARY PLACEHOLDER Cousin VO unavailable: %s"), SoundPath);
+		return;
+	}
+	if (ActiveCousinVoice)
+	{
+		ActiveCousinVoice->OnAudioFinished.RemoveAll(this);
+		ActiveCousinVoice->Stop();
+		ActiveCousinVoice = nullptr;
+	}
+	RemoveCousinSubtitleOverlay();
+	CreateCousinSubtitleOverlay();
+	if (CousinSubtitleSpeakerText)
+	{
+		CousinSubtitleSpeakerText->SetText(NSLOCTEXT("SOTM", "CousinName", "COUSIN"));
+	}
+	if (CousinSubtitleLineText)
+	{
+		CousinSubtitleLineText->SetText(Line);
+	}
+	ActiveCousinVoice = UGameplayStatics::SpawnSoundAtLocation(
+		this, Voice, Location, FRotator::ZeroRotator, Volume, 1.0f, 0.0f,
+		nullptr, nullptr, false);
+	if (!ActiveCousinVoice)
+	{
+		RemoveCousinSubtitleOverlay();
+		return;
+	}
+	ActiveCousinVoice->OnAudioFinished.AddUniqueDynamic(
+		this, &ThisClass::HandleTemporaryCousinVoiceFinished);
+	UE_LOG(LogSOTMPhase2, Display,
+		TEXT("TEMPORARY PLACEHOLDER Cousin VO: %s duration=%.2fs subtitle=%s"),
+		SoundPath, Voice->GetDuration(), *Line.ToString());
+}
+
+void USOTMDemoPhase2WorldSubsystem::HandleTemporaryCousinVoiceFinished()
+{
+	if (ActiveCousinVoice)
+	{
+		ActiveCousinVoice->OnAudioFinished.RemoveAll(this);
+		ActiveCousinVoice->DestroyComponent();
+		ActiveCousinVoice = nullptr;
+	}
+	RemoveCousinSubtitleOverlay();
+}
+
+void USOTMDemoPhase2WorldSubsystem::CreateCousinSubtitleOverlay()
+{
+	if (CousinSubtitleRoot.IsValid())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	UGameViewportClient* Viewport = World && World->GetGameInstance()
+		? World->GetGameInstance()->GetGameViewportClient() : nullptr;
+	if (!Viewport)
+	{
+		return;
+	}
+	CousinSubtitleViewport = Viewport;
+	TSharedRef<SWidget> Content =
+		SNew(SOverlay)
+		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom)
+		.Padding(FMargin(80.0f, 40.0f, 80.0f, 80.0f))
+		[
+			SNew(SBorder)
+			.BorderBackgroundColor(FLinearColor(0.01f, 0.01f, 0.015f, 0.82f))
+			.Padding(FMargin(28.0f, 16.0f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+				[
+					SAssignNew(CousinSubtitleSpeakerText, STextBlock)
+					.ColorAndOpacity(FLinearColor(0.72f, 0.16f, 0.88f, 1.0f))
+				]
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+				[
+					SAssignNew(CousinSubtitleLineText, STextBlock)
+					.ColorAndOpacity(FLinearColor::White)
+					.Justification(ETextJustify::Center)
+				]
+			]
+		];
+	CousinSubtitleRoot = Content;
+	Viewport->AddViewportWidgetContent(CousinSubtitleRoot.ToSharedRef(), 950);
+}
+
+void USOTMDemoPhase2WorldSubsystem::RemoveCousinSubtitleOverlay()
+{
+	if (CousinSubtitleRoot.IsValid())
+	{
+		if (UGameViewportClient* Viewport = CousinSubtitleViewport.Get())
+		{
+			Viewport->RemoveViewportWidgetContent(CousinSubtitleRoot.ToSharedRef());
+		}
+	}
+	CousinSubtitleRoot.Reset();
+	CousinSubtitleSpeakerText.Reset();
+	CousinSubtitleLineText.Reset();
+	CousinSubtitleViewport.Reset();
 }
 
 void USOTMDemoPhase2WorldSubsystem::EnsureForestGameplayHUD()
@@ -606,6 +827,14 @@ void USOTMDemoPhase2WorldSubsystem::NotifyCousinDetected(ASOTMCousinAIController
 	}
 	WarnedControllers.Add(Controller);
 	OnCousinWarningChanged.Broadcast(true);
+	const int32 VoiceIndex = GetTypeHash(Controller->GetFName()) %
+		UE_ARRAY_COUNT(SOTMDemoPhase2Private::CousinDetectVoices);
+	const FVector Location = Controller->GetPawn()
+		? Controller->GetPawn()->GetActorLocation() : FVector::ZeroVector;
+	PlayTemporaryCousinVoice(
+		SOTMDemoPhase2Private::CousinDetectVoices[VoiceIndex],
+		FText::FromString(SOTMDemoPhase2Private::CousinDetectLines[VoiceIndex]),
+		Location, 0.58f);
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(WarningTimer);
@@ -740,7 +969,13 @@ void USOTMDemoPhase2WorldSubsystem::FinishCatchPresentation()
 
 void USOTMDemoPhase2WorldSubsystem::HandlePlayerRespawned(AActor* PlayerActor)
 {
-	(void)PlayerActor;
+	if (PlayerActor)
+	{
+		if (USoundBase* Respawn = LoadObject<USoundBase>(nullptr, SOTMDemoPhase2Private::RespawnSound))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Respawn, PlayerActor->GetActorLocation(), 0.58f);
+		}
+	}
 	FinishCatchPresentation();
 	bCatchActive = false;
 	bCatchImpactApplied = false;

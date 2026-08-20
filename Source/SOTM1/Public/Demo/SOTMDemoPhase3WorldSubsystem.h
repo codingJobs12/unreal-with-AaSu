@@ -7,6 +7,7 @@
 
 class ASOTMTimmyUpgradeStation;
 class UCharacterMovementComponent;
+class UAudioComponent;
 class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -105,6 +106,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> Phase3InputContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> ActiveBoostAudio;
 
 	TWeakObjectPtr<UEnhancedInputComponent> BoundEnhancedInput;
 	uint32 InteractBindingHandle = 0;

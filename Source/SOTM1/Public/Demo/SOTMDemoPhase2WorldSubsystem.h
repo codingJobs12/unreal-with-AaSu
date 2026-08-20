@@ -9,6 +9,8 @@ class ACameraActor;
 class ASOTMCousinAIController;
 class ASOTMCousinCharacter;
 class APlayerController;
+class UAudioComponent;
+class UGameViewportClient;
 class USOTMPlayerStateSubsystem;
 class ASOTMCoinPickup;
 class USOTMIngameUIWidget;
@@ -46,6 +48,13 @@ private:
 	void EnsureForestGameplayHUD();
 	void DisableLegacyForestEnemies(TArray<FTransform>& OutSpawnTransforms);
 	void SpawnProductionCousins(const TArray<FTransform>& CandidateTransforms);
+	void NormalizeForestAudioMix();
+	void ScheduleNextCousinWhisper();
+	void PlayOccasionalCousinWhisper();
+	void PlayTemporaryCousinVoice(const TCHAR* SoundPath, const FText& Line,
+		const FVector& Location, float Volume);
+	void CreateCousinSubtitleOverlay();
+	void RemoveCousinSubtitleOverlay();
 	void SuspendAllCousins();
 	void ResetAllCousins();
 	void HideCousinWarning();
@@ -76,6 +85,9 @@ private:
 	UFUNCTION()
 	void HandleGameOver();
 
+	UFUNCTION()
+	void HandleTemporaryCousinVoiceFinished();
+
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMPlayerStateSubsystem> PlayerState;
 
@@ -88,6 +100,14 @@ private:
 	/** Set only when Phase 2 had to create the existing production HUD itself. */
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMIngameUIWidget> Phase2CreatedHUD;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> ActiveCousinVoice;
+
+	TWeakObjectPtr<UGameViewportClient> CousinSubtitleViewport;
+	TSharedPtr<class SWidget> CousinSubtitleRoot;
+	TSharedPtr<class STextBlock> CousinSubtitleSpeakerText;
+	TSharedPtr<class STextBlock> CousinSubtitleLineText;
 
 	TWeakObjectPtr<ASOTMCousinCharacter> CatchingCousin;
 	TWeakObjectPtr<AActor> CaughtPlayer;
@@ -102,6 +122,7 @@ private:
 	FTimerHandle CatchFinishTimer;
 	FTimerHandle CameraDestroyTimer;
 	FTimerHandle CousinResetTimer;
+	FTimerHandle CousinWhisperTimer;
 
 #if !UE_BUILD_SHIPPING
 	TArray<TWeakObjectPtr<ASOTMCoinPickup>> DevelopmentCoinRoute;

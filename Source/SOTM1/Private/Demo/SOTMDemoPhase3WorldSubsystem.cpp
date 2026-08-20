@@ -4,6 +4,7 @@
 #include "Ability/SOTMTimmyUpgradeStation.h"
 #include "AI/SOTMCousinAIController.h"
 #include "AI/SOTMCousinCharacter.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -17,11 +18,13 @@
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "Kismet/GameplayStatics.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "SOTMPlayerBlueprintLibrary.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMPlayerVitalComponent.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UI/SOTMUpgradeStationWidget.h"
 #include "Misc/CommandLine.h"
@@ -36,6 +39,10 @@ namespace SOTMPhase3Private
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* InteractActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Interact.IA_Interact");
 	const TCHAR* TimmyMeshPath = TEXT("/Game/HorrorBear/Mesh/SKM_HorrorBear.SKM_HorrorBear");
+	const TCHAR* StationOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_StationOpen.SFX_TEMP_StationOpen");
+	const TCHAR* DeniedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Denied.SFX_TEMP_Denied");
+	const TCHAR* UpgradeSuccessSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_UpgradeSuccess.SFX_TEMP_UpgradeSuccess");
+	const TCHAR* BoostSound = TEXT("/Game/SuperPowers/Powers/Speedster/SFX/Cue/WindGust_Cue.WindGust_Cue");
 
 	FName NormalizeMapPackageName(const UWorld* World)
 	{
@@ -75,6 +82,11 @@ void USOTMDemoPhase3WorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void USOTMDemoPhase3WorldSubsystem::Deinitialize()
 {
+	if (ActiveBoostAudio)
+	{
+		ActiveBoostAudio->Stop();
+		ActiveBoostAudio = nullptr;
+	}
 	CloseUpgradeUI();
 	RestoreMovementSpeed();
 	UnbindProductionInput();
@@ -553,6 +565,10 @@ void USOTMDemoPhase3WorldSubsystem::OpenUpgradeUI()
 	PlayerState->AcquireInputLock(ESOTMInputLockReason::Custom);
 	bUpgradeInputLockHeld = true;
 	OnStationPromptChanged.Broadcast(false);
+	if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::StationOpenSound))
+	{
+		UGameplayStatics::PlaySound2D(this, Sound, 0.50f);
+	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Timmy Upgrade Station UI opened."));
 }
 
@@ -600,6 +616,17 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 	if (Result == ESOTMSpeedBoostPurchaseResult::Success)
 	{
 		SetRuntimeState(ESOTMSpeedBoostRuntimeState::Ready);
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::UpgradeSuccessSound))
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, 0.62f);
+		}
+	}
+	else if (Result != ESOTMSpeedBoostPurchaseResult::AlreadyOwned)
+	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::DeniedSound))
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, 0.48f);
+		}
 	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost purchase result=%d"), static_cast<int32>(Result));
 	return Result;
@@ -630,6 +657,11 @@ bool USOTMDemoPhase3WorldSubsystem::TryActivateSpeedBoost()
 	World->GetTimerManager().SetTimer(PresentationTimer, this, &ThisClass::UpdateRuntimePresentation,
 		0.1f, true);
 	SetRuntimeState(ESOTMSpeedBoostRuntimeState::Active, Settings->SpeedBoostDuration);
+	if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::BoostSound))
+	{
+		ActiveBoostAudio = UGameplayStatics::SpawnSound2D(
+			this, Sound, 0.34f, 1.0f, 0.0f, nullptr, false, false);
+	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost ACTIVE base=%.1f boosted=%.1f multiplier=%.2f duration=%.1f"),
 		BaseSpeedBeforeBoost, LastAppliedBoostedSpeed, Settings->SpeedBoostMultiplier,
 		Settings->SpeedBoostDuration);
@@ -644,6 +676,11 @@ void USOTMDemoPhase3WorldSubsystem::FinishActiveSpeedBoost()
 		return;
 	}
 	RestoreMovementSpeed();
+	if (ActiveBoostAudio)
+	{
+		ActiveBoostAudio->FadeOut(0.18f, 0.0f);
+		ActiveBoostAudio = nullptr;
+	}
 	const float Cooldown = GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
 	World->GetTimerManager().SetTimer(CooldownTimer, this, &ThisClass::FinishCooldown, Cooldown, false);
 	SetRuntimeState(ESOTMSpeedBoostRuntimeState::Cooldown, Cooldown);

@@ -7,6 +7,7 @@
 class AActor;
 class ALevelSequenceActor;
 class APlayerController;
+class UAudioComponent;
 class UGameViewportClient;
 class ULevelSequencePlayer;
 class USOTMPlayerStateSubsystem;
@@ -34,11 +35,19 @@ private:
 	void BeginMansionIntro(APlayerController* PlayerController, USOTMPlayerStateSubsystem* PlayerState);
 	void PresentTimmyOpening();
 	void PresentTimmyWarning();
+	void PresentTimmyDanger();
 	void PresentIsabelArrival();
 	void PresentKnockout();
 	void PresentDragging();
 	void FinishMansionIntro();
 	void TravelToForest();
+	void PlayIntroDialogueStep();
+	void AdvanceIntroDialogue();
+	void PlayTemporaryDialogue(const TCHAR* SoundPath, const FText& Speaker, const FText& Line);
+
+	UFUNCTION()
+	void HandleTemporaryDialogueFinished();
+
 	void SetSubtitle(const FText& Speaker, const FText& Line);
 	void FrameActorWithCinematicCamera(AActor* Subject);
 	void CreateSubtitleOverlay();
@@ -48,12 +57,7 @@ private:
 
 	FTimerHandle SaveSlotNormalizationTimer;
 	FTimerHandle IntroStartTimer;
-	FTimerHandle TimmyOpeningTimer;
-	FTimerHandle TimmyWarningTimer;
-	FTimerHandle IsabelArrivalTimer;
-	FTimerHandle KnockoutTimer;
-	FTimerHandle DraggingTimer;
-	FTimerHandle FinishTimer;
+	FTimerHandle DialogueAdvanceTimer;
 	FTimerHandle TravelTimer;
 
 	TWeakObjectPtr<APlayerController> IntroPlayerController;
@@ -69,9 +73,16 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<ALevelSequenceActor> IntroSequenceActor;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> ActiveDialogueAudio;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> MansionAmbienceAudio;
+
 	TSharedPtr<class SWidget> SubtitleViewportRoot;
 	TSharedPtr<class STextBlock> SubtitleSpeakerText;
 	TSharedPtr<class STextBlock> SubtitleLineText;
+	int32 IntroDialogueStep = 0;
 	bool bIntroRequested = false;
 	bool bCinematicLockHeld = false;
 };

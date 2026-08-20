@@ -11,11 +11,13 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
+#include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMPlayerStateSubsystem.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UI/SOTMDemoCompleteWidget.h"
 #include "UnrealClient.h"
@@ -29,6 +31,11 @@ namespace SOTMPhase4Private
 	const TCHAR* ChestMeshPath = TEXT("/Game/Chest_Keys/chest.chest");
 	const TCHAR* GateMeshPath = TEXT("/Game/Fab/Main_gate_entrance/main_gate_entrance/StaticMeshes/main_gate_entrance.main_gate_entrance");
 	const TCHAR* KeyMeshPath = TEXT("/Game/Chest_Keys/GateKeys.GateKeys");
+	const TCHAR* ChestOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_ChestOpen.SFX_TEMP_ChestOpen");
+	const TCHAR* KeyAcquiredSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_KeyAcquired.SFX_TEMP_KeyAcquired");
+	const TCHAR* GateLockedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_GateLocked.SFX_TEMP_GateLocked");
+	const TCHAR* GateOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_GateOpen.SFX_TEMP_GateOpen");
+	const TCHAR* DemoCompleteSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_DemoComplete.SFX_TEMP_DemoComplete");
 
 	FName NormalizeMapPackageName(const UWorld* World)
 	{
@@ -325,6 +332,21 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithChest()
 	const ESOTMPhase4ActionResult Result = Objectives->TryOpenPhase4Chest();
 	if (Result == ESOTMPhase4ActionResult::Success)
 	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::ChestOpenSound))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Sound, ChestArt ? ChestArt->GetActorLocation() : FVector::ZeroVector, 0.60f);
+		}
+		if (UWorld* World = GetWorld())
+		{
+			FTimerHandle KeySoundTimer;
+			World->GetTimerManager().SetTimer(KeySoundTimer, FTimerDelegate::CreateWeakLambda(this, [this]
+			{
+				if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::KeyAcquiredSound))
+				{
+					UGameplayStatics::PlaySound2D(this, Sound, 0.58f);
+				}
+			}), 0.52f, false);
+		}
 		BeginChestPresentation(false);
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "GateKeyAcquired", "GATE KEY ACQUIRED"),
@@ -332,6 +354,10 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithChest()
 	}
 	else if (Result != ESOTMPhase4ActionResult::AlreadyCompleted)
 	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::GateLockedSound))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Sound, ChestArt ? ChestArt->GetActorLocation() : FVector::ZeroVector, 0.45f);
+		}
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "ChestLocked", "CHEST LOCKED"),
 			NSLOCTEXT("SOTM", "CompletePreviousObjectives", "COMPLETE PREVIOUS OBJECTIVES"));
@@ -349,6 +375,10 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithGate()
 	const ESOTMPhase4ActionResult Result = Objectives->TryUnlockPhase4Gate();
 	if (Result == ESOTMPhase4ActionResult::Success)
 	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::GateOpenSound))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Sound, GateArt ? GateArt->GetActorLocation() : FVector::ZeroVector, 0.62f);
+		}
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "GateUnlocked", "GATE UNLOCKED"),
 			NSLOCTEXT("SOTM", "DemoGoalAchieved", "FINAL DEMO GOAL ACHIEVED"));
@@ -356,6 +386,10 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithGate()
 	}
 	else if (Result != ESOTMPhase4ActionResult::AlreadyCompleted)
 	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::GateLockedSound))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Sound, GateArt ? GateArt->GetActorLocation() : FVector::ZeroVector, 0.48f);
+		}
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "GateLocked", "GATE LOCKED"),
 			Objectives->GetGateRequirementFeedback());
@@ -502,6 +536,10 @@ void USOTMDemoPhase4WorldSubsystem::ShowDemoComplete()
 		return;
 	}
 	DemoCompleteWidget->AddToViewport(1000);
+	if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::DemoCompleteSound))
+	{
+		UGameplayStatics::PlaySound2D(this, Sound, 0.58f);
+	}
 	PC->bShowMouseCursor = true;
 	FInputModeUIOnly InputMode;
 	PC->SetInputMode(InputMode);
