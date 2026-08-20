@@ -1,6 +1,8 @@
 #include "Demo/SOTMDemoPhase4WorldSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "AI/SOTMCousinCharacter.h"
+#include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Demo/SOTMPhase4Interactable.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/GameInstance.h"
@@ -113,7 +115,11 @@ void USOTMDemoPhase4WorldSubsystem::InitializePhase4()
 		PlayerState->HasPhase4GateKey(), PlayerState->IsPhase4GateUnlocked(), PlayerState->IsPhase4DemoCompleted());
 
 #if !UE_BUILD_SHIPPING
-	if (FParse::Param(FCommandLine::Get(), TEXT("SOTMPhase4Acceptance")))
+	if (FParse::Param(FCommandLine::Get(), TEXT("SOTMPhase4DeathAfterKeyAcceptance")))
+	{
+		BeginDevelopmentDeathAfterKeyAcceptance();
+	}
+	else if (FParse::Param(FCommandLine::Get(), TEXT("SOTMPhase4Acceptance")))
 	{
 		BeginDevelopmentAcceptanceRoute();
 	}
@@ -536,6 +542,88 @@ void USOTMDemoPhase4WorldSubsystem::HandlePlayerRespawned(AActor* PlayerActor)
 }
 
 #if !UE_BUILD_SHIPPING
+void USOTMDemoPhase4WorldSubsystem::BeginDevelopmentDeathAfterKeyAcceptance()
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+	USOTMDemoPhase2WorldSubsystem* Phase2 = World
+		? World->GetSubsystem<USOTMDemoPhase2WorldSubsystem>() : nullptr;
+	ASOTMCousinCharacter* Cousin = nullptr;
+	if (World)
+	{
+		for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
+		{
+			if (IsValid(*It))
+			{
+				Cousin = *It;
+				break;
+			}
+		}
+	}
+	if (!PlayerState || !Objectives || !World || !Pawn || !ChestArt || !Phase2 || !Cousin)
+	{
+		UE_LOG(LogSOTMPhase4, Error, TEXT("[Phase4DeathAfterKey] setup failed state=%d objectives=%d world=%d pawn=%d chest=%d phase2=%d cousin=%d"),
+			PlayerState != nullptr, Objectives != nullptr, World != nullptr, Pawn != nullptr,
+			ChestArt != nullptr, Phase2 != nullptr, Cousin != nullptr);
+		return;
+	}
+
+	PlayerState->SetPhase3ProgressForDebug(80, 330, true, 1);
+	PlayerState->SetPhase4ProgressForDebug(false, false, false, false);
+	Pawn->SetActorLocation(ChestArt->GetActorLocation() + FVector(180.0f, 0.0f, 90.0f),
+		false, nullptr, ETeleportType::TeleportPhysics);
+	bNearChest = true;
+	RefreshPrompt();
+	InteractWithChest();
+
+	const int32 LivesBeforeCatch = PlayerState->GetCurrentLives();
+	const int32 AvailableBeforeCatch = PlayerState->GetAvailableCoins();
+	const int32 LifetimeBeforeCatch = PlayerState->GetLifetimeCoinsCollected();
+	const bool bPreconditions = PlayerState->IsPhase4ChestOpened() && PlayerState->HasPhase4GateKey() &&
+		PlayerState->IsSpeedBoostUnlocked() &&
+		Objectives->GetActiveChapterOneObjective().ObjectiveId == USOTMObjectiveSubsystem::ReachGateId;
+	UE_LOG(LogSOTMPhase4, Display,
+		TEXT("[Phase4DeathAfterKey] PRE catch preconditions=%d lives=%d coins=%d lifetime=%d chest=%d key=%d boost=%d active=%s"),
+		bPreconditions, LivesBeforeCatch, AvailableBeforeCatch, LifetimeBeforeCatch,
+		PlayerState->IsPhase4ChestOpened(), PlayerState->HasPhase4GateKey(),
+		PlayerState->IsSpeedBoostUnlocked(), *Objectives->GetActiveChapterOneObjective().ObjectiveId.ToString());
+
+	const FVector CatchLocation = Cousin->GetActorLocation() + Cousin->GetActorForwardVector() * 145.0f;
+	Pawn->SetActorLocation(CatchLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	Pawn->SetActorRotation((Cousin->GetActorLocation() - CatchLocation).Rotation());
+	const bool bCatchStarted = Phase2->TryStartCousinCatch(Cousin, Pawn);
+	UE_LOG(LogSOTMPhase4, Display, TEXT("[Phase4DeathAfterKey] production Cousin catch started=%d cousin=%s"),
+		bCatchStarted, *GetNameSafe(Cousin));
+
+	FTimerHandle VerifyTimer;
+	World->GetTimerManager().SetTimer(VerifyTimer, FTimerDelegate::CreateWeakLambda(this,
+		[this, LivesBeforeCatch, AvailableBeforeCatch, LifetimeBeforeCatch]
+		{
+			const bool bPass = PlayerState && Objectives && !PlayerState->IsPlayerDead() &&
+				PlayerState->GetCurrentLives() == LivesBeforeCatch - 1 &&
+				PlayerState->IsPhase4ChestOpened() && PlayerState->HasPhase4GateKey() &&
+				PlayerState->IsSpeedBoostUnlocked() &&
+				PlayerState->GetAvailableCoins() == AvailableBeforeCatch &&
+				PlayerState->GetLifetimeCoinsCollected() == LifetimeBeforeCatch &&
+				Objectives->GetActiveChapterOneObjective().ObjectiveId == USOTMObjectiveSubsystem::ReachGateId;
+			UE_LOG(LogSOTMPhase4, Display,
+				TEXT("[Phase4DeathAfterKey] PASS=%d lives=%d dead=%d chest=%d key=%d boost=%d coins=%d lifetime=%d active=%s"),
+				bPass, PlayerState ? PlayerState->GetCurrentLives() : -1,
+				PlayerState && PlayerState->IsPlayerDead(),
+				PlayerState && PlayerState->IsPhase4ChestOpened(),
+				PlayerState && PlayerState->HasPhase4GateKey(),
+				PlayerState && PlayerState->IsSpeedBoostUnlocked(),
+				PlayerState ? PlayerState->GetAvailableCoins() : -1,
+				PlayerState ? PlayerState->GetLifetimeCoinsCollected() : -1,
+				Objectives ? *Objectives->GetActiveChapterOneObjective().ObjectiveId.ToString() : TEXT("None"));
+			if (APlayerController* Controller = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+			{
+				Controller->ConsoleCommand(TEXT("quit"), true);
+			}
+		}), 8.0f, false);
+}
+
 void USOTMDemoPhase4WorldSubsystem::BeginDevelopmentAcceptanceRoute()
 {
 	UWorld* World = GetWorld();

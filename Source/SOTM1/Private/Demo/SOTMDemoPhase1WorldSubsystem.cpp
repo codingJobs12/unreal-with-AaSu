@@ -147,6 +147,24 @@ void USOTMDemoPhase1WorldSubsystem::NormalizeSaveSlotPresentation()
 				Label->SetText(FText::Format(NSLOCTEXT("SOTM", "StorySaveSlot", "SAVE SLOT {0}"), Number));
 				++Normalized;
 			}
+
+			// The marketplace save widget renders a legacy AreaName from the save object.
+			// Existing saves can contain prototype boss wording even though the client demo
+			// deliberately ends at the Forest gate. Normalize presentation only; never
+			// mutate the authoritative save data here.
+			TArray<UWidget*> SlotWidgets;
+			Slot->WidgetTree->GetAllWidgets(SlotWidgets);
+			for (UWidget* Widget : SlotWidgets)
+			{
+				UTextBlock* TextBlock = Cast<UTextBlock>(Widget);
+				if (!TextBlock) continue;
+				const FString DisplayedText = TextBlock->GetText().ToString();
+				if (DisplayedText.Contains(TEXT("BOSS FIGHT"), ESearchCase::IgnoreCase) ||
+					DisplayedText.Contains(TEXT("FIND THE KEY"), ESearchCase::IgnoreCase))
+				{
+					TextBlock->SetText(NSLOCTEXT("SOTM", "ChapterOneArea", "CHAPTER 1"));
+				}
+			}
 		}
 	}
 	if (Slots.Num() == 4 && Normalized == 4)

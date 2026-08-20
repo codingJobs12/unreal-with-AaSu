@@ -426,7 +426,8 @@ void USOTMDemoPhase2WorldSubsystem::PositionCousinForDevelopmentEncounter()
 		{
 			ASOTMCousinCharacter* ActiveCousin = WeakCousin.Get();
 			APawn* ActivePlayer = WeakPlayer.Get();
-			if (!IsValid(ActiveCousin) || !IsValid(ActivePlayer) || bCatchActive)
+			if (!IsValid(ActiveCousin) || !IsValid(ActivePlayer) || bCatchActive ||
+				bDevelopmentAcceptanceCatchObserved)
 			{
 				return;
 			}

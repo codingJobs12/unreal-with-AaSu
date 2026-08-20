@@ -38,6 +38,7 @@ public:
 
 #if !UE_BUILD_SHIPPING
 	void BeginDevelopmentAcceptanceRoute();
+	void BeginDevelopmentDeathAfterKeyAcceptance();
 	void RunDevelopmentDataAcceptance();
 #endif
 
