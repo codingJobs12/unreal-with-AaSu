@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Ability/SOTMSpeedBoostTypes.h"
+#include "Ability/SOTMLightningThrowTypes.h"
 #include "Blueprint/UserWidget.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMUpgradeStationWidget.generated.h"
@@ -33,11 +34,17 @@ private:
 	UFUNCTION()
 	void HandleObjectiveChanged(FSOTMObjectiveData Objective);
 
+	UFUNCTION()
+	void HandleLightningOwnershipChanged(bool bUnlocked);
+
 	FReply HandleUnlockClicked();
+	FReply HandleLightningUnlockClicked();
 	FReply HandleCloseClicked();
 	void RefreshPresentation();
 	bool CanPurchase() const;
+	bool CanPurchaseLightning() const;
 	FText GetRequirementText() const;
+	FText GetLightningRequirementText() const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMPlayerStateSubsystem> PlayerState;
@@ -52,6 +59,12 @@ private:
 	TSharedPtr<STextBlock> RequirementText;
 	TSharedPtr<SButton> UnlockButton;
 	TSharedPtr<STextBlock> UnlockButtonText;
+	TSharedPtr<STextBlock> LightningOwnershipText;
+	TSharedPtr<STextBlock> LightningRequirementText;
+	TSharedPtr<SButton> LightningUnlockButton;
+	TSharedPtr<STextBlock> LightningUnlockButtonText;
 	ESOTMSpeedBoostPurchaseResult LastPurchaseResult = ESOTMSpeedBoostPurchaseResult::ObjectiveIncomplete;
+	ESOTMLightningThrowPurchaseResult LastLightningResult = ESOTMLightningThrowPurchaseResult::ObjectiveIncomplete;
 	bool bHasAttemptedPurchase = false;
+	bool bHasAttemptedLightningPurchase = false;
 };

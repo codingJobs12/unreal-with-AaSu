@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Ability/SOTMSpeedBoostTypes.h"
+#include "Ability/SOTMLightningThrowTypes.h"
 #include "SOTMPlayerSystemSettings.h"
 #include "SOTMPlayerStateSubsystem.generated.h"
 
@@ -111,6 +112,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Speed Boost")
 	int32 GetSpeedBoostLevel() const { return SpeedBoostLevel; }
 
+	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Lightning Throw")
+	bool IsLightningThrowUnlocked() const { return bLightningThrowUnlocked; }
+
 	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
 	bool IsPhase4ChestOpened() const { return bPhase4ChestOpened; }
 
@@ -131,6 +135,12 @@ public:
 	/** Atomic Phase 3 purchase. Lifetime collection is never reduced. */
 	UFUNCTION(BlueprintCallable, Category="SOTM|Ability|Speed Boost")
 	ESOTMSpeedBoostPurchaseResult TryPurchaseSpeedBoost(
+		int32 UnlockCost,
+		bool bCoinObjectiveCompleted);
+
+	/** Chapter 1's second ability. Speed Boost is a hard prerequisite per the design doc. */
+	UFUNCTION(BlueprintCallable, Category="SOTM|Ability|Lightning Throw")
+	ESOTMLightningThrowPurchaseResult TryPurchaseLightningThrow(
 		int32 UnlockCost,
 		bool bCoinObjectiveCompleted);
 
@@ -235,6 +245,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Ability|Events")
 	FSOTMSpeedBoostOwnershipChangedSignature OnSpeedBoostOwnershipChanged;
 
+	UPROPERTY(BlueprintAssignable, Category="SOTM|Ability|Lightning Throw")
+	FSOTMLightningThrowOwnershipChangedSignature OnLightningThrowOwnershipChanged;
+
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Demo|Phase 4|Events")
 	FSOTMPhase4ProgressChangedSignature OnPhase4ProgressChanged;
 
@@ -253,7 +266,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMInputLocksChangedSignature OnInputLocksChanged;
 
-	static constexpr int32 CurrentSaveVersion = 4;
+	static constexpr int32 CurrentSaveVersion = 5;
 
 private:
 	UFUNCTION()
@@ -305,6 +318,8 @@ private:
 
 	UPROPERTY(Transient)
 	bool bSpeedBoostUnlocked = false;
+
+	bool bLightningThrowUnlocked = false;
 
 	UPROPERTY(Transient)
 	int32 SpeedBoostLevel = 0;

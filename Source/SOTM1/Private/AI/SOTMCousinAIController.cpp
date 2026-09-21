@@ -4,6 +4,7 @@
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -90,6 +91,7 @@ void ASOTMCousinAIController::HandleTargetPerceptionUpdated(AActor* Actor, FAISt
 			{
 				Phase2->NotifyCousinDetected(this);
 			}
+			AlertPack(Actor);
 		}
 	}
 	else if (CurrentTarget.Get() == Actor)
@@ -247,10 +249,85 @@ void ASOTMCousinAIController::SuspendForPlayerDeath()
 
 void ASOTMCousinAIController::ResetAfterPlayerRespawn()
 {
+	GetWorldTimerManager().ClearTimer(StunTimer);
+	bStunActive = false;
 	CurrentTarget.Reset();
 	bCanSeeTarget = false;
 	LastSeenTargetTime = -1.0f;
 	BeginPatrol();
+}
+
+bool ASOTMCousinAIController::ApplyLightningStun(const float DurationSeconds)
+{
+	if (bStunActive || CurrentState == ESOTMCousinAIState::Disabled ||
+		CurrentState == ESOTMCousinAIState::Catch || !GetPawn())
+	{
+		return false;
+	}
+	bStunActive = true;
+	StopMovement();
+	GetWorldTimerManager().ClearTimer(PatrolMoveTimer);
+	SetState(ESOTMCousinAIState::Disabled, TEXT("lightning stun"));
+	GetWorldTimerManager().SetTimer(
+		StunTimer, this, &ThisClass::EndLightningStun, FMath::Max(0.5f, DurationSeconds), false);
+	return true;
+}
+
+void ASOTMCousinAIController::EndLightningStun()
+{
+	if (!bStunActive)
+	{
+		return;
+	}
+	bStunActive = false;
+	// A stun never converts into a kill; the Cousin simply resumes hunting.
+	if (CurrentState == ESOTMCousinAIState::Disabled && GetPawn())
+	{
+		CurrentTarget.Reset();
+		bCanSeeTarget = false;
+		LastSeenTargetTime = -1.0f;
+		BeginPatrol();
+	}
+}
+
+void ASOTMCousinAIController::AlertPack(AActor* PlayerActor)
+{
+	UWorld* World = GetWorld();
+	APawn* SelfPawn = GetPawn();
+	if (!World || !SelfPawn || !PlayerActor || PackAlertRadius <= 0.0f)
+	{
+		return;
+	}
+	const FVector AlertOrigin = SelfPawn->GetActorLocation();
+	for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
+	{
+		if (*It == SelfPawn)
+		{
+			continue;
+		}
+		if (FVector::DistSquared(It->GetActorLocation(), AlertOrigin) > FMath::Square(PackAlertRadius))
+		{
+			continue;
+		}
+		if (ASOTMCousinAIController* Sibling = Cast<ASOTMCousinAIController>(It->GetController()))
+		{
+			Sibling->AggravateTowards(PlayerActor);
+		}
+	}
+}
+
+void ASOTMCousinAIController::AggravateTowards(AActor* PlayerActor)
+{
+	if (bStunActive || !PlayerActor || !IsValidLivingPlayer(PlayerActor) ||
+		CurrentState == ESOTMCousinAIState::Disabled || CurrentState == ESOTMCousinAIState::Catch)
+	{
+		return;
+	}
+	CurrentTarget = PlayerActor;
+	bCanSeeTarget = true;
+	LastKnownTargetLocation = PlayerActor->GetActorLocation();
+	LastSeenTargetTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	SetState(ESOTMCousinAIState::Chase, TEXT("sibling stunned"));
 }
 
 bool ASOTMCousinAIController::IsValidLivingPlayer(const AActor* Actor) const

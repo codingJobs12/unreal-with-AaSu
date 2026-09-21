@@ -17,6 +17,7 @@ enum class ESOTMPhase4ActionResult : uint8
 	AlreadyCompleted,
 	PreviousObjectivesIncomplete,
 	MissingSpeedBoost,
+	MissingLightningThrow,
 	MissingGateKey,
 	SaveFailed,
 	InvalidState

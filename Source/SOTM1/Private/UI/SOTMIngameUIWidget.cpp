@@ -17,6 +17,9 @@
 #include "Engine/World.h"
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
+#include "Ability/SOTMLightningThrowWorldSubsystem.h"
+#include "Ability/SOTMLightningThrowSettings.h"
+#include "Ability/SOTMPhase3Settings.h"
 #include "Demo/SOTMDemoPhase4WorldSubsystem.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
@@ -222,6 +225,17 @@ void USOTMIngameUIWidget::NativeConstruct()
 		HandleSpeedBoostStateChanged(BoundPhase3World->GetSpeedBoostState(), 0.0f, 0.0f);
 	}
 
+	BoundLightningWorld = GetWorld()
+		? GetWorld()->GetSubsystem<USOTMLightningThrowWorldSubsystem>() : nullptr;
+	if (BoundLightningWorld)
+	{
+		BoundLightningWorld->OnLightningThrowStateChanged.RemoveDynamic(
+			this, &ThisClass::HandleLightningThrowStateChanged);
+		BoundLightningWorld->OnLightningThrowStateChanged.AddDynamic(
+			this, &ThisClass::HandleLightningThrowStateChanged);
+		HandleLightningThrowStateChanged(BoundLightningWorld->GetRuntimeState(), 0.0f, 0.0f);
+	}
+
 	BoundPhase4World = GetWorld() ? GetWorld()->GetSubsystem<USOTMDemoPhase4WorldSubsystem>() : nullptr;
 	if (BoundPhase4World)
 	{
@@ -290,6 +304,11 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPhase3World->OnStationPromptChanged.RemoveDynamic(this, &ThisClass::HandleStationPromptChanged);
 		BoundPhase3World->OnSpeedBoostStateChanged.RemoveDynamic(this, &ThisClass::HandleSpeedBoostStateChanged);
 	}
+	if (BoundLightningWorld)
+	{
+		BoundLightningWorld->OnLightningThrowStateChanged.RemoveDynamic(
+			this, &ThisClass::HandleLightningThrowStateChanged);
+	}
 	if (BoundPhase4World)
 	{
 		BoundPhase4World->OnPromptChanged.RemoveDynamic(this, &ThisClass::HandlePhase4PromptChanged);
@@ -298,6 +317,7 @@ void USOTMIngameUIWidget::NativeDestruct()
 	BoundObjectiveState = nullptr;
 	BoundPhase2World = nullptr;
 	BoundPhase3World = nullptr;
+	BoundLightningWorld = nullptr;
 	BoundPhase4World = nullptr;
 
 #if !UE_BUILD_SHIPPING
@@ -466,6 +486,11 @@ void USOTMIngameUIWidget::EnsureProductionHUD()
 	SpeedBoostProgressBar->SetVisibility(ESlateVisibility::Collapsed);
 	SpeedProgressSize->SetContent(SpeedBoostProgressBar);
 	AddVertical(SpeedContent, SpeedProgressSize, FMargin(0.0f, 5.0f, 0.0f, 0.0f));
+	LightningThrowText = CreateText(
+		WidgetTree, TEXT("SOTM_LightningThrowStateText"),
+		NSLOCTEXT("SOTM", "LightningLockedHUD", "LIGHTNING THROW\nLOCKED"), 16, PurpleAccent);
+	LightningThrowText->SetJustification(ETextJustify::Center);
+	AddVertical(SpeedContent, LightningThrowText, FMargin(0.0f, 8.0f, 0.0f, 0.0f));
 	SpeedBoostPanel->SetContent(SpeedContent);
 	if (UCanvasPanelSlot* SpeedSlot = RootCanvas->AddChildToCanvas(SpeedBoostPanel))
 	{
@@ -635,9 +660,25 @@ void USOTMIngameUIWidget::RefreshCoinCounter(
 		FText::AsNumber(SafeLifetime)));
 	if (TopRightCoinText)
 	{
-		TopRightCoinText->SetText(FText::Format(
-			NSLOCTEXT("SOTM", "TopRightCoinCounterFormat", "COINS   {0}"),
-			FText::AsNumber(SafeAvailable)));
+		// The client's objective panel spec asks for the coins still needed for the next
+		// upgrade, so the counter names the cheapest ability the player does not own yet.
+		const USOTMPlayerStateSubsystem* State = BoundPlayerState;
+		int32 NextUpgradeCost = 0;
+		if (State && !State->IsSpeedBoostUnlocked())
+		{
+			NextUpgradeCost = GetDefault<USOTMPhase3Settings>()->SpeedBoostUnlockCost;
+		}
+		else if (State && !State->IsLightningThrowUnlocked())
+		{
+			NextUpgradeCost = GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost;
+		}
+		TopRightCoinText->SetText(NextUpgradeCost > 0
+			? FText::Format(
+				NSLOCTEXT("SOTM", "TopRightCoinUpgradeFormat", "COINS   {0}   /   NEXT UPGRADE   {1}"),
+				FText::AsNumber(SafeAvailable), FText::AsNumber(NextUpgradeCost))
+			: FText::Format(
+				NSLOCTEXT("SOTM", "TopRightCoinCounterFormat", "COINS   {0}"),
+				FText::AsNumber(SafeAvailable)));
 	}
 
 	if (bPlayFeedback && bIncreased)
@@ -894,6 +935,44 @@ void USOTMIngameUIWidget::HandleStationPromptChanged(const bool bVisible)
 	StationPromptPanel->SetVisibility(bVisible && bForestObjectiveActive
 		? ESlateVisibility::SelfHitTestInvisible
 		: ESlateVisibility::Collapsed);
+}
+
+void USOTMIngameUIWidget::HandleLightningThrowStateChanged(
+	const ESOTMLightningThrowRuntimeState State,
+	const float RemainingSeconds,
+	const float NormalizedRemaining)
+{
+	(void)NormalizedRemaining;
+	if (!LightningThrowText)
+	{
+		return;
+	}
+	FNumberFormattingOptions CountdownFormat;
+	CountdownFormat.SetMaximumFractionalDigits(1);
+	CountdownFormat.SetMinimumFractionalDigits(1);
+
+	FText StateText;
+	FLinearColor StateColor = PurpleAccent;
+	switch (State)
+	{
+	case ESOTMLightningThrowRuntimeState::Ready:
+		StateText = NSLOCTEXT("SOTM", "LightningReadyHUD", "LIGHTNING THROW [F]\nREADY");
+		StateColor = FLinearColor(0.35f, 0.90f, 0.22f, 1.0f);
+		break;
+	case ESOTMLightningThrowRuntimeState::Cooldown:
+		StateText = FText::Format(
+			NSLOCTEXT("SOTM", "LightningCooldownHUD", "LIGHTNING THROW\nCOOLDOWN  {0}s"),
+			FText::AsNumber(FMath::Max(0.0f, RemainingSeconds), &CountdownFormat));
+		StateColor = PurpleAccent;
+		break;
+	case ESOTMLightningThrowRuntimeState::Locked:
+	default:
+		StateText = NSLOCTEXT("SOTM", "LightningLockedHUDState", "LIGHTNING THROW\nLOCKED");
+		StateColor = RedAccent;
+		break;
+	}
+	LightningThrowText->SetText(StateText);
+	LightningThrowText->SetColorAndOpacity(FSlateColor(StateColor));
 }
 
 void USOTMIngameUIWidget::HandleSpeedBoostStateChanged(

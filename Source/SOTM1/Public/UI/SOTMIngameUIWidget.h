@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Ability/SOTMSpeedBoostTypes.h"
+#include "Ability/SOTMLightningThrowTypes.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMIngameUIWidget.generated.h"
@@ -12,6 +13,7 @@ class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
 class USOTMDemoPhase2WorldSubsystem;
+class USOTMLightningThrowWorldSubsystem;
 class USOTMDemoPhase3WorldSubsystem;
 class USOTMDemoPhase4WorldSubsystem;
 class USOTMObjectiveSubsystem;
@@ -104,6 +106,12 @@ private:
 		float NormalizedRemaining);
 
 	UFUNCTION()
+	void HandleLightningThrowStateChanged(
+		ESOTMLightningThrowRuntimeState State,
+		float RemainingSeconds,
+		float NormalizedRemaining);
+
+	UFUNCTION()
 	void HandlePhase4ProgressChanged(
 		bool bChestOpened,
 		bool bHasGateKey,
@@ -170,6 +178,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> SpeedBoostText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> LightningThrowText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UProgressBar> SpeedBoostProgressBar;
@@ -245,6 +256,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoPhase3WorldSubsystem> BoundPhase3World;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMLightningThrowWorldSubsystem> BoundLightningWorld;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoPhase4WorldSubsystem> BoundPhase4World;

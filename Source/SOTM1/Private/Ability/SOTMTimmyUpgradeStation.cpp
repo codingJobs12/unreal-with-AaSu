@@ -4,6 +4,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "GameFramework/Pawn.h"
 
 ASOTMTimmyUpgradeStation::ASOTMTimmyUpgradeStation()
 {
@@ -35,11 +36,20 @@ ASOTMTimmyUpgradeStation::ASOTMTimmyUpgradeStation()
 void ASOTMTimmyUpgradeStation::BeginPlay()
 {
 	Super::BeginPlay();
+	InteractionSphere->OnComponentBeginOverlap.AddUniqueDynamic(this, &ThisClass::HandleBeginOverlap);
+	InteractionSphere->OnComponentEndOverlap.AddUniqueDynamic(this, &ThisClass::HandleEndOverlap);
 	InteractionSphere->SetSphereRadius(
 		GetDefault<USOTMPhase3Settings>()->StationInteractionRadius,
 		true);
-	InteractionSphere->OnComponentBeginOverlap.AddUniqueDynamic(this, &ThisClass::HandleBeginOverlap);
-	InteractionSphere->OnComponentEndOverlap.AddUniqueDynamic(this, &ThisClass::HandleEndOverlap);
+
+	// The station spawns onto the Timmy actor while the player may already be standing
+	// within the interaction radius, so no begin-overlap is ever generated for them.
+	TArray<AActor*> AlreadyOverlapping;
+	InteractionSphere->GetOverlappingActors(AlreadyOverlapping, APawn::StaticClass());
+	for (AActor* Overlapping : AlreadyOverlapping)
+	{
+		OnPlayerEntered.Broadcast(Overlapping);
+	}
 }
 
 void ASOTMTimmyUpgradeStation::HandleBeginOverlap(

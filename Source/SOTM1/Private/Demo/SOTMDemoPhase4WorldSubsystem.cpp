@@ -188,7 +188,7 @@ void USOTMDemoPhase4WorldSubsystem::FindProductionArtAndCreateAnchors()
 			ASOTMPhase4Interactable::StaticClass(), ChestArt->GetActorLocation(), FRotator::ZeroRotator, Params);
 		if (ChestAnchor)
 		{
-			ChestAnchor->Configure(ESOTMPhase4InteractableKind::Chest, 425.0f);
+			ChestAnchor->Configure(ESOTMPhase4InteractableKind::Chest, 1500.0f);
 			ChestAnchor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleEntered);
 			ChestAnchor->OnPlayerExited.AddUObject(this, &ThisClass::HandleExited);
 		}
@@ -199,7 +199,7 @@ void USOTMDemoPhase4WorldSubsystem::FindProductionArtAndCreateAnchors()
 			ASOTMPhase4Interactable::StaticClass(), GateArt->GetActorLocation(), FRotator::ZeroRotator, Params);
 		if (GateAnchor)
 		{
-			GateAnchor->Configure(ESOTMPhase4InteractableKind::Gate, 525.0f);
+			GateAnchor->Configure(ESOTMPhase4InteractableKind::Gate, 1200.0f);
 			GateAnchor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleEntered);
 			GateAnchor->OnPlayerExited.AddUObject(this, &ThisClass::HandleExited);
 		}

@@ -32,6 +32,20 @@ public:
 	void ResetAfterPlayerRespawn();
 	void SetPresentationVariant(int32 VariantIndex);
 
+	UFUNCTION(BlueprintPure, Category="SOTM|Cousin")
+	bool IsStunned() const { return CurrentState == ESOTMCousinAIState::Disabled && bStunActive; }
+
+	/** Lightning Throw stuns rather than kills. Returns false when already stunned or disabled. */
+	bool ApplyLightningStun(float DurationSeconds);
+
+	/** Forces this Cousin onto the player after a nearby sibling was stunned or screamed. */
+	void AggravateTowards(AActor* PlayerActor);
+
+private:
+	void AlertPack(AActor* PlayerActor);
+
+public:
+
 private:
 	UFUNCTION()
 	void HandleTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
@@ -57,28 +71,34 @@ private:
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Perception", meta=(ClampMin="200.0"))
-	float SightRadius = 1250.0f;
+	float SightRadius = 2300.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Perception", meta=(ClampMin="200.0"))
-	float LoseSightRadius = 1550.0f;
+	float LoseSightRadius = 2900.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Perception", meta=(ClampMin="1.0", ClampMax="180.0"))
-	float PeripheralVisionHalfAngle = 65.0f;
+	float PeripheralVisionHalfAngle = 85.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Movement", meta=(ClampMin="50.0"))
-	float PatrolSpeed = 155.0f;
+	float PatrolSpeed = 210.0f;
 
+	/** Just above the player's 600 walk speed, but below the 840 Speed Boost, so the
+	 *  boost stays the intended escape rather than walking away being enough. */
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Movement", meta=(ClampMin="50.0"))
-	float ChaseSpeed = 390.0f;
+	float ChaseSpeed = 640.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Movement", meta=(ClampMin="100.0"))
-	float PatrolRadius = 700.0f;
+	float PatrolRadius = 1400.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Catch", meta=(ClampMin="50.0"))
-	float CatchRange = 180.0f;
+	float CatchRange = 220.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Chase", meta=(ClampMin="0.2"))
-	float LostTargetGraceSeconds = 3.0f;
+	float LostTargetGraceSeconds = 7.0f;
+
+	/** A Cousin that spots the player screams for its siblings, so they hunt as a pack. */
+	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Chase", meta=(ClampMin="0.0"))
+	float PackAlertRadius = 3000.0f;
 
 	UPROPERTY(Transient)
 	ESOTMCousinAIState CurrentState = ESOTMCousinAIState::Idle;
@@ -90,6 +110,10 @@ private:
 	float NextChaseMoveTime = 0.0f;
 	int32 PresentationVariant = 0;
 	bool bCanSeeTarget = false;
+	bool bStunActive = false;
 	FTimerHandle EvaluationTimer;
 	FTimerHandle PatrolMoveTimer;
+	FTimerHandle StunTimer;
+
+	void EndLightningStun();
 };

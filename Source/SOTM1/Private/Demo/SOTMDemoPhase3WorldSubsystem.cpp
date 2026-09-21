@@ -1,6 +1,7 @@
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 
 #include "Ability/SOTMPhase3Settings.h"
+#include "Ability/SOTMLightningThrowSettings.h"
 #include "Ability/SOTMTimmyUpgradeStation.h"
 #include "AI/SOTMCousinAIController.h"
 #include "AI/SOTMCousinCharacter.h"
@@ -629,6 +630,38 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 		}
 	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost purchase result=%d"), static_cast<int32>(Result));
+	return Result;
+}
+
+ESOTMLightningThrowPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseLightningThrow()
+{
+	if (!PlayerState)
+	{
+		return ESOTMLightningThrowPurchaseResult::NoActiveSave;
+	}
+	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	USOTMObjectiveSubsystem* Objectives = GameInstance
+		? GameInstance->GetSubsystem<USOTMObjectiveSubsystem>() : nullptr;
+	const bool bObjectiveComplete = Objectives &&
+		Objectives->GetCollectAllForestCoinsObjective().State == ESOTMObjectiveState::Completed;
+	const ESOTMLightningThrowPurchaseResult Result = PlayerState->TryPurchaseLightningThrow(
+		GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost,
+		bObjectiveComplete);
+	if (Result == ESOTMLightningThrowPurchaseResult::Success)
+	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::UpgradeSuccessSound))
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, 0.62f);
+		}
+	}
+	else if (Result != ESOTMLightningThrowPurchaseResult::AlreadyOwned)
+	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::DeniedSound))
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, 0.48f);
+		}
+	}
+	UE_LOG(LogSOTMPhase3, Display, TEXT("Lightning Throw purchase result=%d"), static_cast<int32>(Result));
 	return Result;
 }
 

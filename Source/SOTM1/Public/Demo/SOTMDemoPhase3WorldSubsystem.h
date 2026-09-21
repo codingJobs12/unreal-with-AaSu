@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Ability/SOTMSpeedBoostTypes.h"
+#include "Ability/SOTMLightningThrowTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "SOTMDemoPhase3WorldSubsystem.generated.h"
 
@@ -42,6 +43,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="SOTM|Phase 3")
 	ESOTMSpeedBoostPurchaseResult TryPurchaseSpeedBoost();
+
+	UFUNCTION(BlueprintCallable, Category="SOTM|Phase 3")
+	ESOTMLightningThrowPurchaseResult TryPurchaseLightningThrow();
 
 	UFUNCTION(BlueprintCallable, Category="SOTM|Phase 3")
 	bool TryActivateSpeedBoost();

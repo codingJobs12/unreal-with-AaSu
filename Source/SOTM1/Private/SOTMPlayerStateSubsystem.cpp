@@ -29,6 +29,7 @@ namespace SOTMPlayerStatePrivate
 	const FName CollectedCoinIdsProperty(TEXT("SOTM_CollectedCoinIds"));
 	const FString SpeedBoostRecordPrefix(TEXT("SOTM_SPEEDBOOST|"));
 	const FString Phase4RecordPrefix(TEXT("SOTM_PHASE4|"));
+	const FString LightningThrowRecordPrefix(TEXT("SOTM_LIGHTNING|"));
 
 	bool GetBoolProperty(const UObject* Object, const FName Name, bool& OutValue)
 	{
@@ -363,6 +364,58 @@ ESOTMSpeedBoostPurchaseResult USOTMPlayerStateSubsystem::TryPurchaseSpeedBoost(
 		TEXT("SOTM Speed Boost purchased slot=\"%s\" cost=%d available=%d lifetime=%d level=%d"),
 		*SlotName, UnlockCost, AvailableCoins, LifetimeCoinsCollected, SpeedBoostLevel);
 	return ESOTMSpeedBoostPurchaseResult::Success;
+}
+
+ESOTMLightningThrowPurchaseResult USOTMPlayerStateSubsystem::TryPurchaseLightningThrow(
+	const int32 UnlockCost,
+	const bool bCoinObjectiveCompleted)
+{
+	if (bLightningThrowUnlocked)
+	{
+		return ESOTMLightningThrowPurchaseResult::AlreadyOwned;
+	}
+	if (!bCoinObjectiveCompleted)
+	{
+		return ESOTMLightningThrowPurchaseResult::ObjectiveIncomplete;
+	}
+	if (!bSpeedBoostUnlocked)
+	{
+		return ESOTMLightningThrowPurchaseResult::SpeedBoostMissing;
+	}
+	if (UnlockCost <= 0)
+	{
+		return ESOTMLightningThrowPurchaseResult::InvalidCost;
+	}
+	if (AvailableCoins < UnlockCost)
+	{
+		return ESOTMLightningThrowPurchaseResult::NotEnoughCoins;
+	}
+
+	UObject* Manager = nullptr;
+	USaveGame* SaveObject = nullptr;
+	FString SlotName;
+	if (!GetMenuSaveContext(Manager, SaveObject, SlotName) || SlotName.IsEmpty())
+	{
+		return ESOTMLightningThrowPurchaseResult::NoActiveSave;
+	}
+
+	const int32 PreviousAvailableCoins = AvailableCoins;
+	AvailableCoins -= UnlockCost;
+	bLightningThrowUnlocked = true;
+
+	if (!SavePlayerStateInternal(TEXT("LightningThrowPurchase")))
+	{
+		AvailableCoins = PreviousAvailableCoins;
+		bLightningThrowUnlocked = false;
+		return ESOTMLightningThrowPurchaseResult::SaveFailed;
+	}
+
+	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnLightningThrowOwnershipChanged.Broadcast(bLightningThrowUnlocked);
+	UE_LOG(LogTemp, Display,
+		TEXT("SOTM Lightning Throw purchased slot=\"%s\" cost=%d available=%d lifetime=%d"),
+		*SlotName, UnlockCost, AvailableCoins, LifetimeCoinsCollected);
+	return ESOTMLightningThrowPurchaseResult::Success;
 }
 
 bool USOTMPlayerStateSubsystem::CommitPhase4ChestOpenedAndKey()
@@ -751,6 +804,7 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	LifetimeCoinsCollected = 0;
 	bSpeedBoostUnlocked = false;
 	SpeedBoostLevel = 0;
+	bLightningThrowUnlocked = false;
 	bPhase4ChestOpened = false;
 	bPhase4HasGateKey = false;
 	bPhase4GateUnlocked = false;
@@ -771,6 +825,7 @@ void USOTMPlayerStateSubsystem::ResetRuntimeStateForNewGame()
 	OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
 	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	OnLightningThrowOwnershipChanged.Broadcast(bLightningThrowUnlocked);
 	OnPhase4ProgressChanged.Broadcast(false, false, false, false);
 }
 
@@ -1288,6 +1343,9 @@ bool USOTMPlayerStateSubsystem::WriteStateToSaveObject(UObject* SaveObject) cons
 		bPhase4HasGateKey ? 1 : 0,
 		bPhase4GateUnlocked ? 1 : 0,
 		bPhase4DemoCompleted ? 1 : 0));
+	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d"),
+		*SOTMPlayerStatePrivate::LightningThrowRecordPrefix,
+		bLightningThrowUnlocked ? 1 : 0));
 	const bool bCollectedCoinIdsWritten =
 		SOTMPlayerStatePrivate::SetStringProperty(
 			SaveObject,
@@ -1363,6 +1421,7 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	int32 LoadedLifetimeCoins = 0;
 	bool bLoadedSpeedBoostUnlocked = false;
 	int32 LoadedSpeedBoostLevel = 0;
+	bool bLoadedLightningThrowUnlocked = false;
 	bool bLoadedPhase4ChestOpened = false;
 	bool bLoadedPhase4HasGateKey = false;
 	bool bLoadedPhase4GateUnlocked = false;
@@ -1426,6 +1485,16 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			}
 			continue;
 		}
+		if (SaveVersion >= 5 && SerializedId.StartsWith(SOTMPlayerStatePrivate::LightningThrowRecordPrefix))
+		{
+			TArray<FString> Fields;
+			SerializedId.ParseIntoArray(Fields, TEXT("|"), false);
+			if (Fields.Num() == 2)
+			{
+				bLoadedLightningThrowUnlocked = FCString::Atoi(*Fields[1]) != 0;
+			}
+			continue;
+		}
 		if (SaveVersion >= 4 && SerializedId.StartsWith(SOTMPlayerStatePrivate::Phase4RecordPrefix))
 		{
 			TArray<FString> Fields;
@@ -1454,6 +1523,7 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	// (locked/level 0) even when the save contained a valid unlock record.
 	bSpeedBoostUnlocked = bLoadedSpeedBoostUnlocked && LoadedSpeedBoostLevel > 0;
 	SpeedBoostLevel = bSpeedBoostUnlocked ? FMath::Max(1, LoadedSpeedBoostLevel) : 0;
+	bLightningThrowUnlocked = bLoadedLightningThrowUnlocked && bSpeedBoostUnlocked;
 	bPhase4ChestOpened = bLoadedPhase4ChestOpened;
 	bPhase4HasGateKey = bLoadedPhase4HasGateKey || bPhase4ChestOpened;
 	bPhase4GateUnlocked = bLoadedPhase4GateUnlocked;
@@ -1467,6 +1537,7 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bGameOver = CurrentLives <= 0;
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
 	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	OnLightningThrowOwnershipChanged.Broadcast(bLightningThrowUnlocked);
 	OnPhase4ProgressChanged.Broadcast(
 		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
 	return true;

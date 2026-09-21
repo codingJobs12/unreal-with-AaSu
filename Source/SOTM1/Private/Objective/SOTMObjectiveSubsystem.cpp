@@ -7,6 +7,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogSOTMObjective, Log, All);
 
 const FName USOTMObjectiveSubsystem::CollectAllForestCoinsId(TEXT("CollectAllForestCoins"));
 const FName USOTMObjectiveSubsystem::UnlockSpeedBoostId(TEXT("UnlockSpeedBoost"));
+const FName USOTMObjectiveSubsystem::UnlockLightningThrowId(TEXT("UnlockLightningThrow"));
 const FName USOTMObjectiveSubsystem::FindChestId(TEXT("FindChest"));
 const FName USOTMObjectiveSubsystem::ObtainGateKeyId(TEXT("ObtainGateKey"));
 const FName USOTMObjectiveSubsystem::ReachGateId(TEXT("ReachGate"));
@@ -31,6 +32,8 @@ void USOTMObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	};
 	InitializeBinaryObjective(UnlockSpeedBoost, UnlockSpeedBoostId,
 		NSLOCTEXT("SOTM", "UnlockSpeedBoost", "Unlock Speed Boost"));
+	InitializeBinaryObjective(UnlockLightningThrow, UnlockLightningThrowId,
+		NSLOCTEXT("SOTM", "UnlockLightningThrow", "Unlock Lightning Throw"));
 	InitializeBinaryObjective(FindChest, FindChestId,
 		NSLOCTEXT("SOTM", "FindChest", "Find the Chest"));
 	InitializeBinaryObjective(ObtainGateKey, ObtainGateKeyId,
@@ -112,7 +115,8 @@ void USOTMObjectiveSubsystem::HandlePhase4ProgressChanged(
 
 TArray<FSOTMObjectiveData> USOTMObjectiveSubsystem::GetChapterOneObjectives() const
 {
-	return { CollectAllForestCoins, UnlockSpeedBoost, FindChest, ObtainGateKey, ReachGate, DemoComplete };
+	return { CollectAllForestCoins, UnlockSpeedBoost, UnlockLightningThrow,
+		FindChest, ObtainGateKey, ReachGate, DemoComplete };
 }
 
 FSOTMObjectiveData USOTMObjectiveSubsystem::GetActiveChapterOneObjective() const
@@ -147,6 +151,11 @@ ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryOpenPhase4Chest()
 	{
 		return ESOTMPhase4ActionResult::MissingSpeedBoost;
 	}
+	// Design doc: "That key leads to her true form. You'll need both abilities to survive."
+	if (!PlayerState->IsLightningThrowUnlocked())
+	{
+		return ESOTMPhase4ActionResult::MissingLightningThrow;
+	}
 	return PlayerState->CommitPhase4ChestOpenedAndKey()
 		? ESOTMPhase4ActionResult::Success
 		: ESOTMPhase4ActionResult::SaveFailed;
@@ -171,6 +180,10 @@ ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryUnlockPhase4Gate()
 	if (!PlayerState->IsSpeedBoostUnlocked())
 	{
 		return ESOTMPhase4ActionResult::MissingSpeedBoost;
+	}
+	if (!PlayerState->IsLightningThrowUnlocked())
+	{
+		return ESOTMPhase4ActionResult::MissingLightningThrow;
 	}
 	if (!PlayerState->HasPhase4GateKey())
 	{
@@ -244,6 +257,7 @@ void USOTMObjectiveSubsystem::RefreshFromPersistentCoinState(const bool bForceBr
 void USOTMObjectiveSubsystem::RefreshPhase4Objectives(const bool bForceBroadcast)
 {
 	const FSOTMObjectiveData PreviousUnlock = UnlockSpeedBoost;
+	const FSOTMObjectiveData PreviousLightning = UnlockLightningThrow;
 	const FSOTMObjectiveData PreviousChest = FindChest;
 	const FSOTMObjectiveData PreviousKey = ObtainGateKey;
 	const FSOTMObjectiveData PreviousGate = ReachGate;
@@ -251,6 +265,7 @@ void USOTMObjectiveSubsystem::RefreshPhase4Objectives(const bool bForceBroadcast
 
 	const bool bCoinsComplete = CollectAllForestCoins.State == ESOTMObjectiveState::Completed;
 	const bool bBoost = PlayerState && PlayerState->IsSpeedBoostUnlocked();
+	const bool bLightning = PlayerState && PlayerState->IsLightningThrowUnlocked();
 	const bool bChest = PlayerState && PlayerState->IsPhase4ChestOpened();
 	const bool bKey = PlayerState && PlayerState->HasPhase4GateKey();
 	const bool bGate = PlayerState && PlayerState->IsPhase4GateUnlocked();
@@ -259,20 +274,26 @@ void USOTMObjectiveSubsystem::RefreshPhase4Objectives(const bool bForceBroadcast
 	UnlockSpeedBoost.CurrentProgress = bBoost ? 1 : 0;
 	UnlockSpeedBoost.State = bBoost ? ESOTMObjectiveState::Completed
 		: (bForestObjectiveActive && bCoinsComplete ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
+	UnlockLightningThrow.CurrentProgress = bLightning ? 1 : 0;
+	UnlockLightningThrow.State = bLightning ? ESOTMObjectiveState::Completed
+		: (bForestObjectiveActive && bCoinsComplete && bBoost ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
 	FindChest.CurrentProgress = bChest ? 1 : 0;
 	FindChest.State = bChest ? ESOTMObjectiveState::Completed
-		: (bForestObjectiveActive && bCoinsComplete && bBoost ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
+		: (bForestObjectiveActive && bCoinsComplete && bBoost && bLightning
+			? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
 	ObtainGateKey.CurrentProgress = bKey ? 1 : 0;
 	ObtainGateKey.State = bKey ? ESOTMObjectiveState::Completed
 		: (bChest ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
 	ReachGate.CurrentProgress = bGate ? 1 : 0;
 	ReachGate.State = bGate ? ESOTMObjectiveState::Completed
-		: (bForestObjectiveActive && bCoinsComplete && bBoost && bKey ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
+		: (bForestObjectiveActive && bCoinsComplete && bBoost && bLightning && bKey
+			? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
 	DemoComplete.CurrentProgress = bDemo ? 1 : 0;
 	DemoComplete.State = bDemo ? ESOTMObjectiveState::Completed
 		: (bGate ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
 
 	BroadcastIfChanged(PreviousUnlock, UnlockSpeedBoost, bForceBroadcast);
+	BroadcastIfChanged(PreviousLightning, UnlockLightningThrow, bForceBroadcast);
 	BroadcastIfChanged(PreviousChest, FindChest, bForceBroadcast);
 	BroadcastIfChanged(PreviousKey, ObtainGateKey, bForceBroadcast);
 	BroadcastIfChanged(PreviousGate, ReachGate, bForceBroadcast);

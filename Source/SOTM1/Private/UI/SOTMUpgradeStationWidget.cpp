@@ -1,6 +1,7 @@
 #include "UI/SOTMUpgradeStationWidget.h"
 
 #include "Ability/SOTMPhase3Settings.h"
+#include "Ability/SOTMLightningThrowSettings.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
@@ -142,6 +143,28 @@ TSharedRef<SWidget> USOTMUpgradeStationWidget::RebuildWidget()
 							.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 19))
 						]
 					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 10.0f, 0.0f, 4.0f)
+					[
+						SAssignNew(LightningOwnershipText, STextBlock)
+						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 20))
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SAssignNew(LightningRequirementText, STextBlock)
+						.Justification(ETextJustify::Center)
+						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16))
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(80.0f, 0.0f, 80.0f, 12.0f)
+					[
+						SAssignNew(LightningUnlockButton, SButton)
+						.HAlign(HAlign_Center)
+						.IsEnabled_Lambda([this]() { return CanPurchaseLightning(); })
+						.OnClicked_UObject(this, &ThisClass::HandleLightningUnlockClicked)
+						[
+							SAssignNew(LightningUnlockButtonText, STextBlock)
+							.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 19))
+						]
+					]
 					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 					[
 						SNew(SButton)
@@ -164,6 +187,7 @@ void USOTMUpgradeStationWidget::NativeConstruct()
 	{
 		PlayerState->OnCoinsChanged.AddUniqueDynamic(this, &ThisClass::HandleCoinsChanged);
 		PlayerState->OnSpeedBoostOwnershipChanged.AddUniqueDynamic(this, &ThisClass::HandleOwnershipChanged);
+		PlayerState->OnLightningThrowOwnershipChanged.AddUniqueDynamic(this, &ThisClass::HandleLightningOwnershipChanged);
 	}
 	if (ObjectiveState)
 	{
@@ -179,6 +203,7 @@ void USOTMUpgradeStationWidget::NativeDestruct()
 	{
 		PlayerState->OnCoinsChanged.RemoveDynamic(this, &ThisClass::HandleCoinsChanged);
 		PlayerState->OnSpeedBoostOwnershipChanged.RemoveDynamic(this, &ThisClass::HandleOwnershipChanged);
+		PlayerState->OnLightningThrowOwnershipChanged.RemoveDynamic(this, &ThisClass::HandleLightningOwnershipChanged);
 	}
 	if (ObjectiveState)
 	{
@@ -212,6 +237,12 @@ void USOTMUpgradeStationWidget::HandleOwnershipChanged(bool bUnlocked, int32 Lev
 	RefreshPresentation();
 }
 
+void USOTMUpgradeStationWidget::HandleLightningOwnershipChanged(bool bUnlocked)
+{
+	(void)bUnlocked;
+	RefreshPresentation();
+}
+
 void USOTMUpgradeStationWidget::HandleObjectiveChanged(FSOTMObjectiveData Objective)
 {
 	(void)Objective;
@@ -230,6 +261,59 @@ FReply USOTMUpgradeStationWidget::HandleUnlockClicked()
 	}
 	RefreshPresentation();
 	return FReply::Handled();
+}
+
+FReply USOTMUpgradeStationWidget::HandleLightningUnlockClicked()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (USOTMDemoPhase3WorldSubsystem* Phase3 = World->GetSubsystem<USOTMDemoPhase3WorldSubsystem>())
+		{
+			LastLightningResult = Phase3->TryPurchaseLightningThrow();
+			bHasAttemptedLightningPurchase = true;
+		}
+	}
+	RefreshPresentation();
+	return FReply::Handled();
+}
+
+bool USOTMUpgradeStationWidget::CanPurchaseLightning() const
+{
+	if (!PlayerState || PlayerState->IsLightningThrowUnlocked() || !PlayerState->IsSpeedBoostUnlocked())
+	{
+		return false;
+	}
+	const FSOTMObjectiveData Objective = ObjectiveState
+		? ObjectiveState->GetCollectAllForestCoinsObjective() : FSOTMObjectiveData();
+	return Objective.State == ESOTMObjectiveState::Completed &&
+		PlayerState->GetAvailableCoins() >= GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost;
+}
+
+FText USOTMUpgradeStationWidget::GetLightningRequirementText() const
+{
+	if (!PlayerState)
+	{
+		return FText::FromString(TEXT("PLAYER STATE UNAVAILABLE"));
+	}
+	if (PlayerState->IsLightningThrowUnlocked())
+	{
+		return FText::FromString(TEXT("OWNED - PRESS F TO STUN"));
+	}
+	if (!PlayerState->IsSpeedBoostUnlocked())
+	{
+		return FText::FromString(TEXT("UNLOCK SPEED BOOST FIRST"));
+	}
+	const FSOTMObjectiveData Objective = ObjectiveState
+		? ObjectiveState->GetCollectAllForestCoinsObjective() : FSOTMObjectiveData();
+	if (Objective.State != ESOTMObjectiveState::Completed)
+	{
+		return FText::FromString(TEXT("COLLECT ALL COINS FIRST"));
+	}
+	if (PlayerState->GetAvailableCoins() < GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost)
+	{
+		return FText::FromString(TEXT("NOT ENOUGH COINS"));
+	}
+	return FText::FromString(TEXT("READY TO UNLOCK"));
 }
 
 FReply USOTMUpgradeStationWidget::HandleCloseClicked()
@@ -304,4 +388,22 @@ void USOTMUpgradeStationWidget::RefreshPresentation()
 	RequirementText->SetColorAndOpacity(CanPurchase() || bOwned
 		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
 	UnlockButtonText->SetText(FText::FromString(bOwned ? TEXT("OWNED") : TEXT("UNLOCK SPEED BOOST")));
+
+	if (!LightningOwnershipText || !LightningRequirementText || !LightningUnlockButtonText)
+	{
+		return;
+	}
+	const bool bLightningOwned = PlayerState && PlayerState->IsLightningThrowUnlocked();
+	const int32 LightningCost = GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost;
+	LightningOwnershipText->SetText(FText::Format(
+		FText::FromString(TEXT("LIGHTNING THROW   {0}   -   COST {1}")),
+		FText::FromString(bLightningOwned ? TEXT("OWNED") : TEXT("LOCKED")),
+		FText::AsNumber(LightningCost)));
+	LightningOwnershipText->SetColorAndOpacity(bLightningOwned
+		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
+	LightningRequirementText->SetText(GetLightningRequirementText());
+	LightningRequirementText->SetColorAndOpacity(CanPurchaseLightning() || bLightningOwned
+		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
+	LightningUnlockButtonText->SetText(FText::FromString(
+		bLightningOwned ? TEXT("OWNED") : TEXT("UNLOCK LIGHTNING THROW")));
 }

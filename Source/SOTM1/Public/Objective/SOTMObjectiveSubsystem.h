@@ -52,6 +52,7 @@ class SOTM1_API USOTMObjectiveSubsystem final : public UGameInstanceSubsystem
 public:
 	static const FName CollectAllForestCoinsId;
 	static const FName UnlockSpeedBoostId;
+	static const FName UnlockLightningThrowId;
 	static const FName FindChestId;
 	static const FName ObtainGateKeyId;
 	static const FName ReachGateId;
@@ -120,6 +121,8 @@ private:
 
 	UPROPERTY(Transient)
 	FSOTMObjectiveData UnlockSpeedBoost;
+
+	FSOTMObjectiveData UnlockLightningThrow;
 
 	UPROPERTY(Transient)
 	FSOTMObjectiveData FindChest;
