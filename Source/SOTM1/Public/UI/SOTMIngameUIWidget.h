@@ -146,103 +146,112 @@ private:
 	void HidePhase4Notification();
 	void HideForestHealthPresentation();
 
-	UPROPERTY(Transient)
+	// --- Designer-bound widgets ---------------------------------------------
+	// These are no longer constructed in code (see EnsureProductionHUD in the
+	// .cpp). Build a widget of the matching type and EXACT name below inside
+	// WBP_IngameUI's Designer canvas and UMG will wire the pointer up for you
+	// on compile. BindWidgetOptional (rather than BindWidget) means a widget
+	// that hasn't been built yet in the Designer is simply left null instead
+	// of failing the Blueprint compile, so this can be migrated incrementally.
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> ObjectivePanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> CurrentObjectiveSection;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> CurrentObjectiveText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> ObjectiveProgressText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> FutureObjectivesText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> CoinCounterText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TopRightCoinText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> TopRightCoinPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> LivesText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> SpeedBoostPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> SpeedBoostText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> LightningThrowText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> SpeedBoostProgressBar;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> GateKeyPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> GateKeyText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> Phase4PromptPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Phase4PromptText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> Phase4NotificationPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Phase4NotificationTitle;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Phase4NotificationDetail;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> CousinWarningPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> StationPromptPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> RequiredCoinsSection;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> RequiredCoinsText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> UpgradeSection;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> UpgradeDetailText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> UpgradeProgressBar;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> MissionTasksHeader;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> MissionTasksContainer;
 
+	// Dynamic per-task rows - NOT a Designer widget, still built in code and
+	// parented into MissionTasksContainer above (see SetMissionTask in the .cpp).
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<UTextBlock>> MissionTaskRows;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> BossPanel;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> BossNameText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> BossProgressBar;
 
 	UPROPERTY(Transient)

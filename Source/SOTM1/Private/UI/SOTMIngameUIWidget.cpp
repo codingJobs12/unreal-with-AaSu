@@ -24,6 +24,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "SOTMPlayerBlueprintLibrary.h"
+#include "Styling/SlateBrush.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
 
@@ -31,27 +32,33 @@ DEFINE_LOG_CATEGORY_STATIC(LogSOTMHUD, Log, All);
 
 namespace
 {
-	const FLinearColor PanelColor(0.012f, 0.018f, 0.032f, 0.88f);
-	const FLinearColor PrimaryTextColor(0.93f, 0.90f, 0.85f, 1.0f);
-	const FLinearColor MutedTextColor(0.38f, 0.37f, 0.38f, 1.0f);
-	const FLinearColor PurpleAccent(0.66f, 0.30f, 0.75f, 1.0f);
-	const FLinearColor GoldAccent(0.96f, 0.70f, 0.22f, 1.0f);
-	const FLinearColor RedAccent(0.86f, 0.06f, 0.08f, 1.0f);
+	// --- SOTM Horror HUD palette --------------------------------------------
+	// Oxidised, low-saturation tones instead of flat/bright fills, so panels
+	// read like they're lit by a single dying candle rather than a UI kit.
+	const FLinearColor PanelColor(0.014f, 0.012f, 0.013f, 0.90f);
+	const FLinearColor PrimaryTextColor(0.90f, 0.87f, 0.80f, 1.0f);
+	const FLinearColor MutedTextColor(0.42f, 0.38f, 0.40f, 1.0f);
+	const FLinearColor PurpleAccent(0.52f, 0.22f, 0.62f, 1.0f);
+	const FLinearColor GoldAccent(0.82f, 0.62f, 0.28f, 1.0f);
+	const FLinearColor RedAccent(0.78f, 0.05f, 0.07f, 1.0f);
+	const FLinearColor BloodOutline(0.42f, 0.08f, 0.09f, 0.65f);
 
 	UTextBlock* CreateText(
 		UWidgetTree* Tree,
 		const FName Name,
 		const FText& Text,
 		const int32 Size,
-		const FLinearColor& Color)
+		const FLinearColor& Color,
+		const int32 LetterSpacing = 0)
 	{
 		UTextBlock* Widget = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
 		Widget->SetText(Text);
 		Widget->SetColorAndOpacity(FSlateColor(Color));
-		Widget->SetShadowOffset(FVector2D(1.0f, 1.0f));
-		Widget->SetShadowColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.9f));
+		Widget->SetShadowOffset(FVector2D(1.0f, 2.0f));
+		Widget->SetShadowColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.95f));
 		FSlateFontInfo Font = Widget->GetFont();
 		Font.Size = Size;
+		Font.LetterSpacing = LetterSpacing;
 		Widget->SetFont(Font);
 		return Widget;
 	}
@@ -64,6 +71,15 @@ namespace
 			Slot->SetHorizontalAlignment(HAlign_Fill);
 		}
 	}
+
+	// --- Objective panel palette ---------------------------------------------
+	// Still used at runtime by SetMissionTask() (dynamic row color) and by the
+	// Refresh*/Handle* functions below that recolor text on state changes.
+	// Panel construction itself now lives entirely in WBP_InGameMain.
+	const FLinearColor ObjectiveTitleColor(0.86f, 0.10f, 0.10f, 1.0f);
+	const FLinearColor ObjectiveBodyColor(0.94f, 0.92f, 0.90f, 1.0f);
+	const FLinearColor ObjectiveAccentColor(0.80f, 0.16f, 0.14f, 1.0f);
+	const FLinearColor ObjectiveMutedColor(0.68f, 0.60f, 0.58f, 1.0f);
 
 #if !UE_BUILD_SHIPPING
 	TWeakObjectPtr<USOTMIngameUIWidget> ActiveDevelopmentHUD;
@@ -332,302 +348,19 @@ void USOTMIngameUIWidget::NativeDestruct()
 
 void USOTMIngameUIWidget::EnsureProductionHUD()
 {
-	if (ObjectivePanel || !WidgetTree)
+	// HUD visuals are now built entirely inside WBP_InGameMain's Designer
+	// canvas and wired up automatically via the BindWidgetOptional properties
+	// declared in the header - this function intentionally does not construct
+	// any widgets anymore. It used to hand-build every panel in C++, which
+	// duplicated the WBP-built panels once their names matched and produced
+	// the HUD showing twice. If ObjectivePanel is still null here, the WBP
+	// binding did not take (wrong widget class spawned, or a widget name
+	// mismatch in the Designer) and the HUD will simply be blank rather than
+	// silently falling back to a second, code-built copy.
+	if (!ObjectivePanel)
 	{
-		return;
-	}
-
-	UCanvasPanel* RootCanvas = Cast<UCanvasPanel>(WidgetTree->RootWidget);
-	if (!RootCanvas)
-	{
-		UE_LOG(LogSOTMHUD, Error, TEXT("Production WBP_IngameUI root is not a CanvasPanel."));
-		return;
-	}
-
-	ObjectivePanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SOTM_ObjectivePanel"));
-	ObjectivePanel->SetBrushColor(FLinearColor(0.008f, 0.009f, 0.012f, 0.91f));
-	ObjectivePanel->SetPadding(FMargin(22.0f, 18.0f));
-	UVerticalBox* ObjectiveContent = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_ObjectiveContent"));
-	ObjectivePanel->SetContent(ObjectiveContent);
-
-	UTextBlock* PanelTitle = CreateText(
-		WidgetTree, TEXT("SOTM_ObjectivePanelTitle"),
-		NSLOCTEXT("SOTM", "Phase2ObjectivesTitle", "OBJECTIVES"), 25, FLinearColor(0.92f, 0.75f, 0.53f, 1.0f));
-	PanelTitle->SetJustification(ETextJustify::Center);
-	AddVertical(ObjectiveContent, PanelTitle, FMargin(0.0f, 0.0f, 0.0f, 16.0f));
-
-	CurrentObjectiveSection = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_CurrentObjectiveSection"));
-	CurrentObjectiveText = CreateText(
-		WidgetTree, TEXT("SOTM_CurrentObjectiveText"), FText::GetEmpty(), 19, PrimaryTextColor);
-	CurrentObjectiveText->SetAutoWrapText(true);
-	CurrentObjectiveText->SetWrapTextAt(330.0f);
-	ObjectiveProgressText = CreateText(
-		WidgetTree, TEXT("SOTM_ObjectiveProgressText"), FText::GetEmpty(), 18, GoldAccent);
-	ObjectiveProgressText->SetJustification(ETextJustify::Right);
-	AddVertical(CurrentObjectiveSection, CurrentObjectiveText, FMargin(0.0f, 1.0f, 0.0f, 2.0f));
-	AddVertical(CurrentObjectiveSection, ObjectiveProgressText, FMargin(0.0f, 0.0f, 0.0f, 13.0f));
-	CurrentObjectiveSection->SetVisibility(ESlateVisibility::Collapsed);
-	AddVertical(ObjectiveContent, CurrentObjectiveSection, FMargin(0.0f));
-
-	FutureObjectivesText = CreateText(
-		WidgetTree, TEXT("SOTM_FutureObjectivesText"),
-		NSLOCTEXT("SOTM", "Phase2FutureObjectives", "[LOCKED]  Find the Chest\n\n[LOCKED]  Obtain the Gate Key\n\n[LOCKED]  Reach the Gate"),
-		17, MutedTextColor);
-	FutureObjectivesText->SetLineHeightPercentage(1.0f);
-	AddVertical(ObjectiveContent, FutureObjectivesText, FMargin(0.0f, 0.0f, 0.0f, 15.0f));
-
-	CoinCounterText = CreateText(
-		WidgetTree, TEXT("SOTM_CoinCounterText"), FText::GetEmpty(), 21, GoldAccent);
-	AddVertical(ObjectiveContent, CoinCounterText, FMargin(0.0f, 7.0f, 0.0f, 4.0f));
-
-	RequiredCoinsSection = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_RequiredCoinsSection"));
-	UTextBlock* RequiredHeader = CreateText(
-		WidgetTree, TEXT("SOTM_RequiredCoinsHeader"),
-		NSLOCTEXT("SOTM", "RequiredCoinsHeader", "COINS NEEDED"), 12, MutedTextColor);
-	RequiredCoinsText = CreateText(
-		WidgetTree, TEXT("SOTM_RequiredCoinsText"), FText::GetEmpty(), 18, PrimaryTextColor);
-	AddVertical(RequiredCoinsSection, RequiredHeader, FMargin(0.0f));
-	AddVertical(RequiredCoinsSection, RequiredCoinsText, FMargin(0.0f, 1.0f, 0.0f, 6.0f));
-	RequiredCoinsSection->SetVisibility(ESlateVisibility::Collapsed);
-	AddVertical(ObjectiveContent, RequiredCoinsSection, FMargin(0.0f));
-
-	UpgradeSection = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_UpgradeSection"));
-	UTextBlock* UpgradeHeader = CreateText(
-		WidgetTree, TEXT("SOTM_UpgradeHeader"),
-		NSLOCTEXT("SOTM", "UpgradeProgressHeader", "UPGRADE PROGRESS"), 12, MutedTextColor);
-	USizeBox* UpgradeBarSize = WidgetTree->ConstructWidget<USizeBox>(
-		USizeBox::StaticClass(), TEXT("SOTM_UpgradeBarSize"));
-	UpgradeBarSize->SetHeightOverride(9.0f);
-	UpgradeProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
-		UProgressBar::StaticClass(), TEXT("SOTM_UpgradeProgressBar"));
-	UpgradeProgressBar->SetFillColorAndOpacity(PurpleAccent);
-	UpgradeBarSize->SetContent(UpgradeProgressBar);
-	UpgradeDetailText = CreateText(
-		WidgetTree, TEXT("SOTM_UpgradeDetailText"), FText::GetEmpty(), 14, PrimaryTextColor);
-	AddVertical(UpgradeSection, UpgradeHeader, FMargin(0.0f));
-	AddVertical(UpgradeSection, UpgradeBarSize, FMargin(0.0f, 3.0f, 0.0f, 2.0f));
-	AddVertical(UpgradeSection, UpgradeDetailText, FMargin(0.0f, 1.0f, 0.0f, 6.0f));
-	UpgradeSection->SetVisibility(ESlateVisibility::Collapsed);
-	AddVertical(ObjectiveContent, UpgradeSection, FMargin(0.0f));
-
-	MissionTasksHeader = CreateText(
-		WidgetTree, TEXT("SOTM_MissionTasksHeader"),
-		NSLOCTEXT("SOTM", "MissionTasksHeader", "MISSION TASKS"), 12, MutedTextColor);
-	MissionTasksHeader->SetVisibility(ESlateVisibility::Collapsed);
-	AddVertical(ObjectiveContent, MissionTasksHeader, FMargin(0.0f, 2.0f, 0.0f, 2.0f));
-	MissionTasksContainer = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_MissionTasks"));
-	MissionTasksContainer->SetVisibility(ESlateVisibility::Collapsed);
-	AddVertical(ObjectiveContent, MissionTasksContainer, FMargin(0.0f));
-
-	USizeBox* ObjectiveSize = WidgetTree->ConstructWidget<USizeBox>(
-		USizeBox::StaticClass(), TEXT("SOTM_ObjectivePanelSize"));
-	ObjectiveSize->SetWidthOverride(410.0f);
-	ObjectiveSize->SetContent(ObjectivePanel);
-	if (UCanvasPanelSlot* ObjectiveSlot = RootCanvas->AddChildToCanvas(ObjectiveSize))
-	{
-		ObjectiveSlot->SetAnchors(FAnchors(0.0f, 0.0f));
-		ObjectiveSlot->SetAlignment(FVector2D(0.0f, 0.0f));
-		ObjectiveSlot->SetPosition(FVector2D(24.0f, 24.0f));
-		ObjectiveSlot->SetAutoSize(true);
-		ObjectiveSlot->SetZOrder(100);
-	}
-
-	TopRightCoinPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_TopRightCoinPanel"));
-	TopRightCoinPanel->SetBrushColor(FLinearColor(0.01f, 0.008f, 0.006f, 0.86f));
-	TopRightCoinPanel->SetPadding(FMargin(18.0f, 8.0f));
-	TopRightCoinText = CreateText(
-		WidgetTree, TEXT("SOTM_TopRightCoinText"), FText::GetEmpty(), 26, GoldAccent);
-	TopRightCoinPanel->SetContent(TopRightCoinText);
-	if (UCanvasPanelSlot* CoinSlot = RootCanvas->AddChildToCanvas(TopRightCoinPanel))
-	{
-		CoinSlot->SetAnchors(FAnchors(1.0f, 0.0f));
-		CoinSlot->SetAlignment(FVector2D(1.0f, 0.0f));
-		CoinSlot->SetPosition(FVector2D(-24.0f, 24.0f));
-		CoinSlot->SetAutoSize(true);
-		CoinSlot->SetZOrder(100);
-	}
-
-	LivesText = CreateText(
-		WidgetTree, TEXT("SOTM_LivesText"), FText::GetEmpty(), 20, PurpleAccent);
-	LivesText->SetJustification(ETextJustify::Left);
-	if (UCanvasPanelSlot* LivesSlot = RootCanvas->AddChildToCanvas(LivesText))
-	{
-		LivesSlot->SetAnchors(FAnchors(0.0f, 1.0f));
-		LivesSlot->SetAlignment(FVector2D(0.0f, 1.0f));
-		LivesSlot->SetPosition(FVector2D(28.0f, -34.0f));
-		LivesSlot->SetAutoSize(true);
-		LivesSlot->SetZOrder(100);
-	}
-
-	SpeedBoostPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_SpeedBoostLockedPanel"));
-	SpeedBoostPanel->SetBrushColor(FLinearColor(0.025f, 0.012f, 0.038f, 0.88f));
-	SpeedBoostPanel->SetPadding(FMargin(18.0f, 10.0f));
-	UVerticalBox* SpeedContent = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_SpeedBoostContent"));
-	SpeedBoostText = CreateText(
-		WidgetTree, TEXT("SOTM_SpeedBoostStateText"),
-		NSLOCTEXT("SOTM", "SpeedBoostLocked", "SPEED BOOST\nLOCKED"), 17, PurpleAccent);
-	SpeedBoostText->SetJustification(ETextJustify::Center);
-	AddVertical(SpeedContent, SpeedBoostText, FMargin(0.0f));
-	USizeBox* SpeedProgressSize = WidgetTree->ConstructWidget<USizeBox>(
-		USizeBox::StaticClass(), TEXT("SOTM_SpeedBoostProgressSize"));
-	SpeedProgressSize->SetHeightOverride(6.0f);
-	SpeedProgressSize->SetWidthOverride(120.0f);
-	SpeedBoostProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
-		UProgressBar::StaticClass(), TEXT("SOTM_SpeedBoostProgressBar"));
-	SpeedBoostProgressBar->SetFillColorAndOpacity(PurpleAccent);
-	SpeedBoostProgressBar->SetVisibility(ESlateVisibility::Collapsed);
-	SpeedProgressSize->SetContent(SpeedBoostProgressBar);
-	AddVertical(SpeedContent, SpeedProgressSize, FMargin(0.0f, 5.0f, 0.0f, 0.0f));
-	LightningThrowText = CreateText(
-		WidgetTree, TEXT("SOTM_LightningThrowStateText"),
-		NSLOCTEXT("SOTM", "LightningLockedHUD", "LIGHTNING THROW\nLOCKED"), 16, PurpleAccent);
-	LightningThrowText->SetJustification(ETextJustify::Center);
-	AddVertical(SpeedContent, LightningThrowText, FMargin(0.0f, 8.0f, 0.0f, 0.0f));
-	SpeedBoostPanel->SetContent(SpeedContent);
-	if (UCanvasPanelSlot* SpeedSlot = RootCanvas->AddChildToCanvas(SpeedBoostPanel))
-	{
-		SpeedSlot->SetAnchors(FAnchors(0.5f, 1.0f));
-		SpeedSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-		SpeedSlot->SetPosition(FVector2D(-255.0f, -24.0f));
-		SpeedSlot->SetAutoSize(true);
-		SpeedSlot->SetZOrder(100);
-	}
-
-	StationPromptPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_TimmyStationPrompt"));
-	StationPromptPanel->SetBrushColor(FLinearColor(0.015f, 0.006f, 0.022f, 0.94f));
-	StationPromptPanel->SetPadding(FMargin(24.0f, 12.0f));
-	UTextBlock* StationPromptText = CreateText(
-		WidgetTree, TEXT("SOTM_TimmyStationPromptText"),
-		NSLOCTEXT("SOTM", "TimmyStationPrompt", "[E]  INTERACT\nUPGRADE ABILITIES"),
-		19, PurpleAccent);
-	StationPromptText->SetJustification(ETextJustify::Center);
-	StationPromptPanel->SetContent(StationPromptText);
-	StationPromptPanel->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* PromptSlot = RootCanvas->AddChildToCanvas(StationPromptPanel))
-	{
-		PromptSlot->SetAnchors(FAnchors(0.5f, 0.72f));
-		PromptSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-		PromptSlot->SetPosition(FVector2D::ZeroVector);
-		PromptSlot->SetAutoSize(true);
-		PromptSlot->SetZOrder(180);
-	}
-
-	GateKeyPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_GateKeyLockedPanel"));
-	GateKeyPanel->SetBrushColor(FLinearColor(0.018f, 0.012f, 0.022f, 0.88f));
-	GateKeyPanel->SetPadding(FMargin(20.0f, 10.0f));
-	GateKeyText = CreateText(
-		WidgetTree, TEXT("SOTM_GateKeyLockedText"),
-		NSLOCTEXT("SOTM", "GateKeyNotAcquired", "GATE KEY\nNOT ACQUIRED"), 17, PurpleAccent);
-	GateKeyText->SetJustification(ETextJustify::Center);
-	GateKeyPanel->SetContent(GateKeyText);
-	if (UCanvasPanelSlot* GateSlot = RootCanvas->AddChildToCanvas(GateKeyPanel))
-	{
-		GateSlot->SetAnchors(FAnchors(1.0f, 1.0f));
-		GateSlot->SetAlignment(FVector2D(1.0f, 1.0f));
-		GateSlot->SetPosition(FVector2D(-24.0f, -24.0f));
-		GateSlot->SetAutoSize(true);
-		GateSlot->SetZOrder(100);
-	}
-
-	Phase4PromptPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_Phase4PromptPanel"));
-	Phase4PromptPanel->SetBrushColor(FLinearColor(0.012f, 0.006f, 0.020f, 0.94f));
-	Phase4PromptPanel->SetPadding(FMargin(24.0f, 13.0f));
-	Phase4PromptText = CreateText(
-		WidgetTree, TEXT("SOTM_Phase4PromptText"), FText::GetEmpty(), 20, GoldAccent);
-	Phase4PromptText->SetJustification(ETextJustify::Center);
-	Phase4PromptPanel->SetContent(Phase4PromptText);
-	Phase4PromptPanel->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* PromptSlot = RootCanvas->AddChildToCanvas(Phase4PromptPanel))
-	{
-		PromptSlot->SetAnchors(FAnchors(0.5f, 1.0f));
-		PromptSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-		PromptSlot->SetPosition(FVector2D(0.0f, -88.0f));
-		PromptSlot->SetAutoSize(true);
-		PromptSlot->SetZOrder(260);
-	}
-
-	Phase4NotificationPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_Phase4NotificationPanel"));
-	Phase4NotificationPanel->SetBrushColor(FLinearColor(0.055f, 0.012f, 0.09f, 0.95f));
-	Phase4NotificationPanel->SetPadding(FMargin(34.0f, 20.0f));
-	UVerticalBox* NotificationContent = WidgetTree->ConstructWidget<UVerticalBox>();
-	Phase4NotificationTitle = CreateText(
-		WidgetTree, TEXT("SOTM_Phase4NotificationTitle"), FText::GetEmpty(), 25, GoldAccent);
-	Phase4NotificationTitle->SetJustification(ETextJustify::Center);
-	Phase4NotificationDetail = CreateText(
-		WidgetTree, TEXT("SOTM_Phase4NotificationDetail"), FText::GetEmpty(), 17, PrimaryTextColor);
-	Phase4NotificationDetail->SetJustification(ETextJustify::Center);
-	AddVertical(NotificationContent, Phase4NotificationTitle, FMargin(0.0f, 0.0f, 0.0f, 7.0f));
-	AddVertical(NotificationContent, Phase4NotificationDetail, FMargin(0.0f));
-	Phase4NotificationPanel->SetContent(NotificationContent);
-	Phase4NotificationPanel->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* NoticeSlot = RootCanvas->AddChildToCanvas(Phase4NotificationPanel))
-	{
-		NoticeSlot->SetAnchors(FAnchors(0.5f, 0.20f));
-		NoticeSlot->SetAlignment(FVector2D(0.5f, 0.0f));
-		NoticeSlot->SetPosition(FVector2D(0.0f, 0.0f));
-		NoticeSlot->SetAutoSize(true);
-		NoticeSlot->SetZOrder(270);
-	}
-
-	CousinWarningPanel = WidgetTree->ConstructWidget<UBorder>(
-		UBorder::StaticClass(), TEXT("SOTM_CousinWarningPanel"));
-	CousinWarningPanel->SetBrushColor(FLinearColor(0.08f, 0.005f, 0.008f, 0.91f));
-	CousinWarningPanel->SetPadding(FMargin(24.0f, 14.0f));
-	UTextBlock* WarningText = CreateText(
-		WidgetTree, TEXT("SOTM_CousinWarningText"),
-		NSLOCTEXT("SOTM", "CousinSpotted", "COUSIN SPOTTED!\nHide or run before it catches you!"),
-		21, RedAccent);
-	WarningText->SetJustification(ETextJustify::Center);
-	CousinWarningPanel->SetContent(WarningText);
-	CousinWarningPanel->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* WarningSlot = RootCanvas->AddChildToCanvas(CousinWarningPanel))
-	{
-		WarningSlot->SetAnchors(FAnchors(1.0f, 0.55f));
-		WarningSlot->SetAlignment(FVector2D(1.0f, 0.5f));
-		WarningSlot->SetPosition(FVector2D(-24.0f, 0.0f));
-		WarningSlot->SetAutoSize(true);
-		WarningSlot->SetZOrder(200);
-	}
-
-	BossPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SOTM_BossPanel"));
-	BossPanel->SetBrushColor(PanelColor);
-	BossPanel->SetPadding(FMargin(18.0f, 10.0f));
-	UVerticalBox* BossContent = WidgetTree->ConstructWidget<UVerticalBox>(
-		UVerticalBox::StaticClass(), TEXT("SOTM_BossContent"));
-	BossPanel->SetContent(BossContent);
-	BossNameText = CreateText(
-		WidgetTree, TEXT("SOTM_BossNameText"), FText::GetEmpty(), 18, PrimaryTextColor);
-	BossNameText->SetJustification(ETextJustify::Center);
-	USizeBox* BossBarSize = WidgetTree->ConstructWidget<USizeBox>(
-		USizeBox::StaticClass(), TEXT("SOTM_BossBarSize"));
-	BossBarSize->SetWidthOverride(500.0f);
-	BossBarSize->SetHeightOverride(12.0f);
-	BossProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
-		UProgressBar::StaticClass(), TEXT("SOTM_BossProgressBar"));
-	BossProgressBar->SetFillColorAndOpacity(FLinearColor(0.50f, 0.08f, 0.68f, 1.0f));
-	BossBarSize->SetContent(BossProgressBar);
-	AddVertical(BossContent, BossNameText, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
-	AddVertical(BossContent, BossBarSize, FMargin(0.0f));
-	BossPanel->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* BossSlot = RootCanvas->AddChildToCanvas(BossPanel))
-	{
-		BossSlot->SetAnchors(FAnchors(0.5f, 0.0f));
-		BossSlot->SetAlignment(FVector2D(0.5f, 0.0f));
-		BossSlot->SetPosition(FVector2D(0.0f, 32.0f));
-		BossSlot->SetAutoSize(true);
-		BossSlot->SetZOrder(110);
+		UE_LOG(LogSOTMHUD, Warning,
+			TEXT("ObjectivePanel is null - WBP_InGameMain did not bind. Check the spawned widget class and widget names in the Designer."));
 	}
 }
 
@@ -739,7 +472,7 @@ void USOTMIngameUIWidget::FinishCoinPulse()
 	if (CoinCounterText)
 	{
 		CoinCounterText->SetRenderTransform(FWidgetTransform());
-		CoinCounterText->SetColorAndOpacity(FSlateColor(GoldAccent));
+		CoinCounterText->SetColorAndOpacity(FSlateColor(ObjectiveTitleColor));
 	}
 	if (TopRightCoinText)
 	{
@@ -806,7 +539,7 @@ void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData&
 				? NSLOCTEXT("SOTM", "ObjectiveCompleteFormat", "[COMPLETE]  {0}")
 				: NSLOCTEXT("SOTM", "ObjectiveActiveFormat", "[ACTIVE]  {0}"),
 			Active.DisplayName));
-		CurrentObjectiveText->SetColorAndOpacity(FSlateColor(bCompleted ? GoldAccent : PrimaryTextColor));
+		CurrentObjectiveText->SetColorAndOpacity(FSlateColor(bCompleted ? ObjectiveTitleColor : ObjectiveBodyColor));
 		ObjectiveProgressText->SetText(Active.ObjectiveId == USOTMObjectiveSubsystem::CollectAllForestCoinsId
 			? FText::Format(NSLOCTEXT("SOTM", "ForestCoinsProgress", "{0} / {1}"),
 				FText::AsNumber(FMath::Max(0, Active.CurrentProgress)),
@@ -1124,7 +857,7 @@ void USOTMIngameUIWidget::SetMissionTask(
 	UTextBlock* Row = MissionTaskRows.FindRef(TaskId);
 	if (!Row)
 	{
-		Row = CreateText(WidgetTree, NAME_None, FText::GetEmpty(), 15, PrimaryTextColor);
+		Row = CreateText(WidgetTree, NAME_None, FText::GetEmpty(), 15, ObjectiveBodyColor);
 		Row->SetAutoWrapText(true);
 		Row->SetWrapTextAt(335.0f);
 		AddVertical(MissionTasksContainer, Row, FMargin(0.0f, 1.0f));
@@ -1136,7 +869,7 @@ void USOTMIngameUIWidget::SetMissionTask(
 			? NSLOCTEXT("SOTM", "CompletedTaskFormat", "[DONE]  {0}")
 			: NSLOCTEXT("SOTM", "ActiveTaskFormat", "-  {0}"),
 		TaskText));
-	Row->SetColorAndOpacity(FSlateColor(bCompleted ? MutedTextColor : PrimaryTextColor));
+	Row->SetColorAndOpacity(FSlateColor(bCompleted ? ObjectiveMutedColor : ObjectiveBodyColor));
 	MissionTasksHeader->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	MissionTasksContainer->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 }

@@ -369,17 +369,23 @@ void USOTMDemoPhase2WorldSubsystem::EnsureForestGameplayHUD()
 	{
 		return;
 	}
-	for (TObjectIterator<USOTMIngameUIWidget> It; It; ++It)
+
+	// Only skip creation if THIS subsystem instance already made one and it's
+	// still actually on screen. World Subsystems are recreated fresh for each
+	// new World/PIE session, so this pointer is naturally scoped to the
+	// current session and can never be confused by a previous session's
+	// widget. (A global TObjectIterator scan used to live here instead - it
+	// could find a not-yet-garbage-collected widget left over from an earlier
+	// PIE session and wrongly conclude the HUD already existed, silently
+	// skipping creation on the 2nd/3rd Play in the same editor session.)
+	if (IsValid(Phase2CreatedHUD) && Phase2CreatedHUD->IsInViewport())
 	{
-		if (It->GetWorld() == World && It->IsInViewport())
-		{
-			return;
-		}
+		return;
 	}
 
 	APlayerController* PC = World->GetFirstPlayerController();
 	UClass* HUDClass = LoadClass<USOTMIngameUIWidget>(nullptr,
-		TEXT("/Game/MenuSystemPro/ExampleContent/Common/UI/WBP_IngameUI.WBP_IngameUI_C"));
+		TEXT("/Game/UI/Horror/WBP_InGameMain.WBP_InGameMain_C"));
 	if (!PC || !HUDClass)
 	{
 		UE_LOG(LogSOTMPhase2, Error, TEXT("Phase 2 could not locate the production gameplay HUD/player controller."));
@@ -390,7 +396,11 @@ void USOTMDemoPhase2WorldSubsystem::EnsureForestGameplayHUD()
 	{
 		Phase2CreatedHUD->AddToViewport(50);
 		UE_LOG(LogSOTMPhase2, Display,
-			TEXT("Phase 2 created the existing production WBP_IngameUI because no viewport instance existed."));
+			TEXT("Phase 2 created the production WBP_InGameMain HUD because no viewport instance existed."));
+	}
+	else
+	{
+		UE_LOG(LogSOTMPhase2, Error, TEXT("Phase 2 failed to CreateWidget from HUDClass %s."), *HUDClass->GetName());
 	}
 }
 
