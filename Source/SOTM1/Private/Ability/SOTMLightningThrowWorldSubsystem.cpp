@@ -68,6 +68,7 @@ void USOTMLightningThrowWorldSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(CooldownTimer);
+		World->GetTimerManager().ClearTimer(CooldownTickTimer);
 		World->GetTimerManager().ClearTimer(InitializeTimer);
 	}
 	UnbindProductionInput();
@@ -166,9 +167,42 @@ void USOTMLightningThrowWorldSubsystem::SetRuntimeState(const ESOTMLightningThro
 
 void USOTMLightningThrowWorldSubsystem::FinishCooldown()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CooldownTickTimer);
+	}
 	if (RuntimeState == ESOTMLightningThrowRuntimeState::Cooldown)
 	{
 		RefreshStateFromOwnership();
+	}
+}
+
+void USOTMLightningThrowWorldSubsystem::TickCooldown()
+{
+	// Runs every 0.1s while on cooldown so the HUD's progress bar animates smoothly
+	// and the countdown text steps down 4, 3, 2, 1 instead of only updating once at
+	// the start and once at the end of the 4-second cooldown.
+	if (RuntimeState != ESOTMLightningThrowRuntimeState::Cooldown)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(CooldownTickTimer);
+		}
+		return;
+	}
+
+	const float Cooldown = FMath::Max(
+		0.1f, GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown);
+	const float Remaining = GetCooldownRemaining();
+	OnLightningThrowStateChanged.Broadcast(
+		RuntimeState, Remaining, FMath::Clamp(Remaining / Cooldown, 0.0f, 1.0f));
+
+	if (Remaining <= 0.0f)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(CooldownTickTimer);
+		}
 	}
 }
 
@@ -268,6 +302,12 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 	World->GetTimerManager().SetTimer(
 		CooldownTimer, this, &ThisClass::FinishCooldown,
 		FMath::Max(0.1f, Settings->LightningThrowCooldown), false);
+	// Starts only here, i.e. only when the player presses F while the ability is
+	// unlocked and Ready (guarded by the early-out above). Repeats every 0.1s so
+	// the HUD progress bar and the 4/3/2/1 countdown update continuously instead
+	// of jumping straight from full to empty.
+	World->GetTimerManager().SetTimer(
+		CooldownTickTimer, this, &ThisClass::TickCooldown, 0.1f, true);
 	SetRuntimeState(ESOTMLightningThrowRuntimeState::Cooldown);
 
 	UE_LOG(LogSOTMLightning, Display,

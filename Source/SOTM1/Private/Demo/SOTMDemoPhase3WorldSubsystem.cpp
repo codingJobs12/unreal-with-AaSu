@@ -6,11 +6,9 @@
 #include "AI/SOTMCousinAIController.h"
 #include "AI/SOTMCousinCharacter.h"
 #include "Components/AudioComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/GameInstance.h"
-#include "Animation/SkeletalMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
@@ -39,7 +37,6 @@ namespace SOTMPhase3Private
 {
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* InteractActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Interact.IA_Interact");
-	const TCHAR* TimmyMeshPath = TEXT("/Game/HorrorBear/Mesh/SKM_HorrorBear.SKM_HorrorBear");
 	const TCHAR* StationOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_StationOpen.SFX_TEMP_StationOpen");
 	const TCHAR* DeniedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Denied.SFX_TEMP_Denied");
 	const TCHAR* UpgradeSuccessSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_UpgradeSuccess.SFX_TEMP_UpgradeSuccess");
@@ -102,9 +99,12 @@ void USOTMDemoPhase3WorldSubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
+	// StationActor is a level-placed actor now (not spawned by this subsystem), so it
+	// is not ours to Destroy() - just drop our delegate bindings and the reference.
 	if (StationActor)
 	{
-		StationActor->Destroy();
+		StationActor->OnPlayerEntered.RemoveAll(this);
+		StationActor->OnPlayerExited.RemoveAll(this);
 	}
 	StationActor = nullptr;
 	PlayerState = nullptr;
@@ -117,7 +117,7 @@ void USOTMDemoPhase3WorldSubsystem::InitializePhase3()
 	{
 		return;
 	}
-	SpawnStationAtProductionTimmy();
+	BindToPlacedTimmyStation();
 	BindProductionInput();
 	SetRuntimeState(PlayerState->IsSpeedBoostUnlocked()
 		? ESOTMSpeedBoostRuntimeState::Ready
@@ -382,58 +382,43 @@ void USOTMDemoPhase3WorldSubsystem::CaptureDevelopmentEvidence(const FString& La
 }
 #endif
 
-void USOTMDemoPhase3WorldSubsystem::SpawnStationAtProductionTimmy()
+void USOTMDemoPhase3WorldSubsystem::BindToPlacedTimmyStation()
 {
 	UWorld* World = GetWorld();
-	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
-	APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
-	if (!World || !PlayerPawn || StationActor)
+	if (!World || StationActor)
 	{
 		return;
 	}
 
-	AActor* NearestTimmy = nullptr;
-	float NearestDistanceSq = TNumericLimits<float>::Max();
-	for (TActorIterator<ASkeletalMeshActor> It(World); It; ++It)
+	// The station is now a Blueprint-placeable actor (BP subclass of
+	// ASOTMTimmyUpgradeStation) that a level designer drags directly into the level at
+	// Timmy's location, instead of being found-and-spawned by C++ at runtime. Find the
+	// instance placed in this level and bind to it.
+	ASOTMTimmyUpgradeStation* PlacedStation = nullptr;
+	for (TActorIterator<ASOTMTimmyUpgradeStation> It(World); It; ++It)
 	{
-		USkeletalMeshComponent* MeshComponent = It->GetSkeletalMeshComponent();
-		const USkeletalMesh* Mesh = MeshComponent ? MeshComponent->GetSkeletalMeshAsset() : nullptr;
-		if (!Mesh || Mesh->GetPathName() != SOTMPhase3Private::TimmyMeshPath)
-		{
-			continue;
-		}
-		const float DistanceSq = FVector::DistSquared(PlayerPawn->GetActorLocation(), It->GetActorLocation());
-		if (DistanceSq < NearestDistanceSq)
-		{
-			NearestDistanceSq = DistanceSq;
-			NearestTimmy = *It;
-		}
+		PlacedStation = *It;
+		break;
 	}
-	if (!NearestTimmy)
+	if (!PlacedStation)
 	{
-		UE_LOG(LogSOTMPhase3, Error, TEXT("Production CH1 Timmy/HorrorBear actor was not found; station not spawned."));
+		UE_LOG(LogSOTMPhase3, Error,
+			TEXT("No ASOTMTimmyUpgradeStation (e.g. BP_TimmyUpgradeStation) is placed in this level; station prompt/UI will not work."));
 		return;
 	}
 
-	FRotator Facing = (PlayerPawn->GetActorLocation() - NearestTimmy->GetActorLocation()).Rotation();
-	Facing.Pitch = 0.0f;
-	Facing.Roll = 0.0f;
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Params.ObjectFlags |= RF_Transient;
-	StationActor = World->SpawnActor<ASOTMTimmyUpgradeStation>(
-		ASOTMTimmyUpgradeStation::StaticClass(), NearestTimmy->GetActorLocation(), Facing, Params);
-	if (StationActor)
-	{
-		StationActor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleStationEntered);
-		StationActor->OnPlayerExited.AddUObject(this, &ThisClass::HandleStationExited);
-		UE_LOG(LogSOTMPhase3, Display, TEXT("Timmy station attached to %s at %s distance=%.1f"),
-			*NearestTimmy->GetPathName(), *NearestTimmy->GetActorLocation().ToCompactString(),
-			FMath::Sqrt(NearestDistanceSq));
-	}
-}
+	StationActor = PlacedStation;
+	StationActor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleStationEntered);
+	StationActor->OnPlayerExited.AddUObject(this, &ThisClass::HandleStationExited);
+	// This actor's BeginPlay() already ran as part of normal level startup, well before
+	// this binding happens (~0.9s into InitializePhase3) - so if the player is already
+	// standing inside its interaction radius, the real begin-overlap event already fired
+	// with nobody listening. Catch that case explicitly now that we are listening.
+	StationActor->NotifyBoundListenersOfExistingOverlaps();
 
-void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
+	UE_LOG(LogSOTMPhase3, Display, TEXT("Bound to placed Timmy station %s at %s"),
+		*StationActor->GetName(), *StationActor->GetActorLocation().ToCompactString());
+}void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
 {
 	UWorld* World = GetWorld();
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
@@ -521,24 +506,22 @@ void USOTMDemoPhase3WorldSubsystem::HandleSpeedBoostInput()
 	TryActivateSpeedBoost();
 }
 
+// StationActor->OnPlayerEntered -> here. ASOTMTimmyUpgradeStation already filters for
+// the player (BP_MenuSystemCharacter0) before broadcasting, so this is just: overlap
+// started -> show the prompt panel. Nothing else.
 void USOTMDemoPhase3WorldSubsystem::HandleStationEntered(AActor* Actor)
 {
-	if (!PlayerState || !PlayerState->IsBoundPlayerActor(Actor) || PlayerState->IsPlayerDead() || PlayerState->IsGameOver())
-	{
-		return;
-	}
+	(void)Actor;
 	bPlayerInStationRange = true;
-	OnStationPromptChanged.Broadcast(true);
+	OnStationPromptChanged.Broadcast(true); // -> SOTMIngameUIWidget::HandleStationPromptChanged shows StationPromptPanel
 }
 
+// StationActor->OnPlayerExited -> here. Overlap ended -> hide the prompt panel. Nothing else.
 void USOTMDemoPhase3WorldSubsystem::HandleStationExited(AActor* Actor)
 {
-	if (!PlayerState || !PlayerState->IsBoundPlayerActor(Actor))
-	{
-		return;
-	}
+	(void)Actor;
 	bPlayerInStationRange = false;
-	OnStationPromptChanged.Broadcast(false);
+	OnStationPromptChanged.Broadcast(false); // -> SOTMIngameUIWidget::HandleStationPromptChanged hides StationPromptPanel
 }
 
 void USOTMDemoPhase3WorldSubsystem::OpenUpgradeUI()

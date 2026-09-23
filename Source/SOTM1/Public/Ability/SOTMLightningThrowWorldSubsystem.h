@@ -43,6 +43,7 @@ private:
 	void HandleLightningInput();
 	void SetRuntimeState(ESOTMLightningThrowRuntimeState NewState);
 	void FinishCooldown();
+	void TickCooldown();
 	void RefreshStateFromOwnership();
 
 	UPROPERTY(Transient)
@@ -58,5 +59,6 @@ private:
 	uint32 LightningBindingHandle = 0;
 	ESOTMLightningThrowRuntimeState RuntimeState = ESOTMLightningThrowRuntimeState::Locked;
 	FTimerHandle CooldownTimer;
+	FTimerHandle CooldownTickTimer;
 	FTimerHandle InitializeTimer;
 };

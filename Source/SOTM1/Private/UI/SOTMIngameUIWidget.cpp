@@ -560,7 +560,7 @@ void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData&
 				continue;
 			}
 			const TCHAR* Prefix = Item.State == ESOTMObjectiveState::Completed ? TEXT("[DONE]")
-				: (Item.State == ESOTMObjectiveState::Active ? TEXT("[ACTIVE]") : TEXT("[LOCKED]"));
+				: (Item.State == ESOTMObjectiveState::Active ? TEXT("[ACTIVE]") : TEXT("\u25C6 [LOCKED]"));
 			Rows += FString::Printf(TEXT("%s  %s\n\n"), Prefix, *Item.DisplayName.ToString());
 		}
 		Rows.RemoveFromEnd(TEXT("\n\n"));
@@ -582,7 +582,6 @@ void USOTMIngameUIWidget::HandlePhase4ProgressChanged(
 		GateKeyText->SetText(bHasGateKey
 			? NSLOCTEXT("SOTM", "GateKeyAcquiredHUD", "GATE KEY\nACQUIRED")
 			: NSLOCTEXT("SOTM", "GateKeyNotAcquired", "GATE KEY\nNOT ACQUIRED"));
-		GateKeyText->SetColorAndOpacity(FSlateColor(bHasGateKey ? GoldAccent : PurpleAccent));
 	}
 	if (BoundObjectiveState)
 	{
@@ -664,8 +663,12 @@ void USOTMIngameUIWidget::HandleStationPromptChanged(const bool bVisible)
 	{
 		return;
 	}
-	const bool bForestObjectiveActive = BoundObjectiveState && BoundObjectiveState->IsForestObjectiveActive();
-	StationPromptPanel->SetVisibility(bVisible && bForestObjectiveActive
+	// Timmy's Upgrade Station also exists outside the Forest map (e.g. the CH1
+	// Mansion), so gating this on IsForestObjectiveActive() (true only in the
+	// Forest map) was silently hiding the prompt anywhere else the station is
+	// placed even while the player was genuinely standing in range. Show/hide it
+	// purely off the station's own overlap state instead.
+	StationPromptPanel->SetVisibility(bVisible
 		? ESlateVisibility::SelfHitTestInvisible
 		: ESlateVisibility::Collapsed);
 }
@@ -675,7 +678,6 @@ void USOTMIngameUIWidget::HandleLightningThrowStateChanged(
 	const float RemainingSeconds,
 	const float NormalizedRemaining)
 {
-	(void)NormalizedRemaining;
 	if (!LightningThrowText)
 	{
 		return;
@@ -686,6 +688,7 @@ void USOTMIngameUIWidget::HandleLightningThrowStateChanged(
 
 	FText StateText;
 	FLinearColor StateColor = PurpleAccent;
+	bool bShowProgress = false;
 	switch (State)
 	{
 	case ESOTMLightningThrowRuntimeState::Ready:
@@ -693,10 +696,13 @@ void USOTMIngameUIWidget::HandleLightningThrowStateChanged(
 		StateColor = FLinearColor(0.35f, 0.90f, 0.22f, 1.0f);
 		break;
 	case ESOTMLightningThrowRuntimeState::Cooldown:
+		// Floating-point countdown (e.g. 4.0 -> 3.9 -> ... -> 0.1), driven by the world
+		// subsystem's 0.1s cooldown ticker, starting from LightningThrowCooldown (4.0s).
 		StateText = FText::Format(
 			NSLOCTEXT("SOTM", "LightningCooldownHUD", "LIGHTNING THROW\nCOOLDOWN  {0}s"),
 			FText::AsNumber(FMath::Max(0.0f, RemainingSeconds), &CountdownFormat));
 		StateColor = PurpleAccent;
+		bShowProgress = true;
 		break;
 	case ESOTMLightningThrowRuntimeState::Locked:
 	default:
@@ -706,6 +712,13 @@ void USOTMIngameUIWidget::HandleLightningThrowStateChanged(
 	}
 	LightningThrowText->SetText(StateText);
 	LightningThrowText->SetColorAndOpacity(FSlateColor(StateColor));
+	if (LightningThrowProgressBar)
+	{
+		LightningThrowProgressBar->SetPercent(FMath::Clamp(NormalizedRemaining, 0.0f, 1.0f));
+		LightningThrowProgressBar->SetVisibility(bShowProgress
+			? ESlateVisibility::SelfHitTestInvisible
+			: ESlateVisibility::Collapsed);
+	}
 }
 
 void USOTMIngameUIWidget::HandleSpeedBoostStateChanged(
@@ -753,9 +766,10 @@ void USOTMIngameUIWidget::HandleSpeedBoostStateChanged(
 
 	SpeedBoostText->SetText(StateText);
 	SpeedBoostText->SetColorAndOpacity(FSlateColor(StateColor));
-	SpeedBoostPanel->SetBrushColor(State == ESOTMSpeedBoostRuntimeState::Active
-		? FLinearColor(0.08f, 0.015f, 0.14f, 0.94f)
-		: FLinearColor(0.025f, 0.012f, 0.038f, 0.88f));
+	// The panel border now has an image texture background (Designer change), so
+	// tinting it near-black here was crushing that texture to black. Keep the brush
+	// at full white/opaque so the texture shows its own natural colors.
+	SpeedBoostPanel->SetBrushColor(FLinearColor::White);
 	SpeedBoostProgressBar->SetPercent(FMath::Clamp(NormalizedRemaining, 0.0f, 1.0f));
 	SpeedBoostProgressBar->SetVisibility(bShowProgress
 		? ESlateVisibility::SelfHitTestInvisible

@@ -230,12 +230,14 @@ void USOTMPlayerFoundationWorldSubsystem::NormalizeCH1RenderState(
 	APlayerController* PlayerController,
 	APawn* Pawn)
 {
-	if (bCH1RenderStateNormalized ||
-		!GetNormalizedMapPackageName(&World).ToString().EndsWith(TEXT("/CH1")))
-	{
-		return;
-	}
-
+	// This used to run only once per World, gated by bCH1RenderStateNormalized. That
+	// broke once it stopped being CH1-only: the very first pass (in Mansion, before
+	// CH1 is ever reached) would flip the flag and permanently skip every later call -
+	// including the one that should have reset the view when CH1 (with Boss Isabel)
+	// actually loads. Re-normalizing is cheap (just show-flag/view-mode assignments),
+	// so this now runs on every player-binding pass instead of only once, which
+	// guarantees a stuck debug ViewMode/Buffer Visualization gets cleared no matter
+	// which map or boss encounter it turns up in.
 	UGameViewportClient* GameViewport = World.GetGameViewport();
 	if (!GameViewport)
 	{
@@ -263,7 +265,6 @@ void USOTMPlayerFoundationWorldSubsystem::NormalizeCH1RenderState(
 	GameViewport->SetCurrentSubstrateVisualizationMode(NAME_None);
 	GameViewport->SetCurrentGroomVisualizationMode(NAME_None);
 	GameViewport->SetCurrentVirtualShadowMapVisualizationMode(NAME_None);
-	bCH1RenderStateNormalized = true;
 
 	UE_LOG(LogTemp, Display,
 		TEXT("SOTM CH1 Render: initialized map=%s worldType=%d controller=%s pawn=%s viewTarget=%s PostProcessing=%d Tonemapper=%d EyeAdaptation=%d viewMode=Lit debugVisualizations=cleared."),

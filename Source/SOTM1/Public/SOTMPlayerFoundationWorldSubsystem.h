@@ -61,7 +61,6 @@ private:
 	bool bDeathAnimationPlaying = false;
 	TWeakObjectPtr<UCameraComponent> NormalizedPlayerCamera;
 
-	bool bCH1RenderStateNormalized = false;
 
 #if !UE_BUILD_SHIPPING
 	TSharedPtr<class SWidget> DebugPanelWidget;

@@ -57,7 +57,7 @@ public:
 	static const FName ObtainGateKeyId;
 	static const FName ReachGateId;
 	static const FName DemoCompleteId;
-	static constexpr int32 TotalForestCoins = 330;
+	static constexpr int32 TotalForestCoins = 300; // TEMP: testing threshold, was 330
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;

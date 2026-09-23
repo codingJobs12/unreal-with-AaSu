@@ -58,7 +58,7 @@ public:
 
 private:
 	void InitializePhase3();
-	void SpawnStationAtProductionTimmy();
+	void BindToPlacedTimmyStation();
 	void BindProductionInput();
 	void UnbindProductionInput();
 	void HandleInteractInput();

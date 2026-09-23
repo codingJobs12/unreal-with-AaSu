@@ -190,6 +190,9 @@ private:
 	TObjectPtr<UTextBlock> LightningThrowText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UProgressBar> LightningThrowProgressBar;
+
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> SpeedBoostProgressBar;
 
 	UPROPERTY(meta=(BindWidgetOptional))
