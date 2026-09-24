@@ -7,19 +7,37 @@
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMUpgradeStationWidget.generated.h"
 
-class SButton;
-class STextBlock;
+class UButton;
+class UTextBlock;
 class USOTMObjectiveSubsystem;
 class USOTMPlayerStateSubsystem;
 
-/** Functional, data-driven Phase 3 station screen built in the approved gothic layout. */
-UCLASS()
-class SOTM1_API USOTMUpgradeStationWidget final : public UUserWidget
+/**
+ * Event-driven presentation adapter for Timmy's Upgrade Station screen.
+ *
+ * Visuals are built in the Designer (WBP_UpgradeStation, a Blueprint subclass of this
+ * class) instead of hand-built Slate in C++. This base class only drives state and
+ * reacts to purchase/close input. Same BindWidgetOptional pattern as SOTMIngameUIWidget:
+ * build a widget of the matching type and EXACT name below inside WBP_UpgradeStation's
+ * Designer canvas and UMG wires the pointer up for you on compile.
+ *
+ * PRIORITY LAYOUT (same idea as SOTMIngameUIWidget's current-vs-future objective text):
+ * the big widget group (AbilityNameText/OwnershipText/DescriptionText/LevelText/
+ * SpeedIncreaseText/DurationText/CooldownText/AvailableCoinsText/CostText/
+ * RequirementText/UnlockButton) always shows whichever ability the player should buy
+ * next - Speed Boost until it's owned, then Lightning Throw. The small "Lightning..."-
+ * named group is the minimized slot for whichever ability is NOT currently the
+ * priority (so it holds Lightning Throw's info before Speed Boost is owned, and Speed
+ * Boost's own OWNED status afterward). Which ability each group's text/button actually
+ * represents is decided per-frame in RefreshPresentation() - the widget names in the
+ * Designer don't need to change.
+ */
+UCLASS(Abstract, Blueprintable)
+class SOTM1_API USOTMUpgradeStationWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
 protected:
-	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
@@ -37,9 +55,15 @@ private:
 	UFUNCTION()
 	void HandleLightningOwnershipChanged(bool bUnlocked);
 
-	FReply HandleUnlockClicked();
-	FReply HandleLightningUnlockClicked();
-	FReply HandleCloseClicked();
+	UFUNCTION()
+	void HandleUnlockClicked();
+
+	UFUNCTION()
+	void HandleLightningUnlockClicked();
+
+	UFUNCTION()
+	void HandleCloseClicked();
+
 	void RefreshPresentation();
 	bool CanPurchase() const;
 	bool CanPurchaseLightning() const;
@@ -52,17 +76,61 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMObjectiveSubsystem> ObjectiveState;
 
-	TSharedPtr<STextBlock> OwnershipText;
-	TSharedPtr<STextBlock> LevelText;
-	TSharedPtr<STextBlock> AvailableCoinsText;
-	TSharedPtr<STextBlock> CostText;
-	TSharedPtr<STextBlock> RequirementText;
-	TSharedPtr<SButton> UnlockButton;
-	TSharedPtr<STextBlock> UnlockButtonText;
-	TSharedPtr<STextBlock> LightningOwnershipText;
-	TSharedPtr<STextBlock> LightningRequirementText;
-	TSharedPtr<SButton> LightningUnlockButton;
-	TSharedPtr<STextBlock> LightningUnlockButtonText;
+	// --- Designer-bound widgets ---------------------------------------------
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> AbilityNameText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> OwnershipText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> DescriptionText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> LevelText;
+
+	// Stat rows under StatsBorder/VerticalBox_Stats. Reused for whichever ability is the
+	// current priority: Speed Boost fills them with SPEED INCREASE/DURATION/COOLDOWN,
+	// Lightning Throw fills them with RANGE/STUN DURATION/COOLDOWN.
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> SpeedIncreaseText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> DurationText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> CooldownText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> AvailableCoinsText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> CostText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> RequirementText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UButton> UnlockButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> UnlockButtonText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> LightningOwnershipText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> LightningRequirementText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UButton> LightningUnlockButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> LightningUnlockButtonText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UButton> CloseButton;
+
 	ESOTMSpeedBoostPurchaseResult LastPurchaseResult = ESOTMSpeedBoostPurchaseResult::ObjectiveIncomplete;
 	ESOTMLightningThrowPurchaseResult LastLightningResult = ESOTMLightningThrowPurchaseResult::ObjectiveIncomplete;
 	bool bHasAttemptedPurchase = false;

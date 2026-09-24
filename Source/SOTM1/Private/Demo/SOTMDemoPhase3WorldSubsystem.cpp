@@ -534,7 +534,20 @@ void USOTMDemoPhase3WorldSubsystem::OpenUpgradeUI()
 		return;
 	}
 
-	UpgradeWidget = CreateWidget<USOTMUpgradeStationWidget>(PC, USOTMUpgradeStationWidget::StaticClass());
+	// UI is now built in the Designer (WBP_UpgradeStation, a Blueprint subclass of
+	// USOTMUpgradeStationWidget) instead of the old hand-built Slate widget, so load
+	// that class instead of using the raw C++ StaticClass() - same pattern as
+	// USOTMDemoPhase2WorldSubsystem::EnsureProductionHUD loading WBP_InGameMain.
+	UClass* UpgradeWidgetClass = LoadClass<USOTMUpgradeStationWidget>(nullptr,
+		TEXT("/Game/UI/Horror/WBP_UpgradeStation.WBP_UpgradeStation_C"));
+	if (!UpgradeWidgetClass)
+	{
+		// USOTMUpgradeStationWidget is Abstract now (visuals live only in the WBP
+		// subclass), so there is no usable fallback - just bail out loudly.
+		UE_LOG(LogSOTMPhase3, Error, TEXT("Could not load WBP_UpgradeStation; the upgrade station UI will not open."));
+		return;
+	}
+	UpgradeWidget = CreateWidget<USOTMUpgradeStationWidget>(PC, UpgradeWidgetClass);
 	if (!UpgradeWidget)
 	{
 		return;

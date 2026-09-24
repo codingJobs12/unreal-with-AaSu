@@ -2,180 +2,12 @@
 
 #include "Ability/SOTMPhase3Settings.h"
 #include "Ability/SOTMLightningThrowSettings.h"
+#include "Components/Button.h"
+#include "Components/TextBlock.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
 #include "SOTMPlayerStateSubsystem.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SBox.h"
-#include "Widgets/SBoxPanel.h"
-#include "Widgets/SOverlay.h"
-#include "Widgets/Text/STextBlock.h"
-
-namespace SOTMUpgradeUIPrivate
-{
-	const FLinearColor Gold(0.93f, 0.64f, 0.23f, 1.0f);
-	const FLinearColor Purple(0.73f, 0.25f, 0.96f, 1.0f);
-	const FLinearColor Green(0.32f, 0.84f, 0.22f, 1.0f);
-	const FLinearColor Red(0.95f, 0.08f, 0.08f, 1.0f);
-	const FLinearColor SoftWhite(0.88f, 0.85f, 0.80f, 1.0f);
-}
-
-TSharedRef<SWidget> USOTMUpgradeStationWidget::RebuildWidget()
-{
-	const USOTMPhase3Settings* Settings = GetDefault<USOTMPhase3Settings>();
-
-	return SNew(SOverlay)
-		+ SOverlay::Slot()
-		.HAlign(HAlign_Fill)
-		.VAlign(VAlign_Fill)
-		[
-			SNew(SBorder)
-			.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.74f))
-		]
-		+ SOverlay::Slot()
-		.HAlign(HAlign_Center)
-		.VAlign(VAlign_Center)
-		.Padding(24.0f)
-		[
-			SNew(SBox)
-			.WidthOverride(680.0f)
-			.MaxDesiredHeight(670.0f)
-			[
-				SNew(SBorder)
-				.Padding(FMargin(34.0f, 24.0f))
-				.BorderBackgroundColor(FLinearColor(0.012f, 0.006f, 0.017f, 0.97f))
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("TIMMY'S UPGRADE STATION")))
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 25))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::Purple)
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 16.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("SPEED BOOST")))
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 31))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::SoftWhite)
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SAssignNew(OwnershipText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 22))
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 14.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("Temporarily increases movement speed.\nPress [Q] during Forest gameplay.")))
-						.Justification(ETextJustify::Center)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 17))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::SoftWhite)
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 16.0f)
-					[
-						SAssignNew(LevelText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 18))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::Purple)
-					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(36.0f, 0.0f, 36.0f, 14.0f)
-					[
-						SNew(SBorder)
-						.Padding(14.0f)
-						.BorderBackgroundColor(FLinearColor(0.025f, 0.015f, 0.035f, 0.92f))
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
-							[
-								SNew(STextBlock).Text(FText::Format(
-									FText::FromString(TEXT("SPEED INCREASE                     +{0}%")),
-									FText::AsNumber(FMath::RoundToInt((Settings->SpeedBoostMultiplier - 1.0f) * 100.0f))))
-								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 17))
-								.ColorAndOpacity(SOTMUpgradeUIPrivate::Green)
-							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
-							[
-								SNew(STextBlock).Text(FText::Format(
-									FText::FromString(TEXT("DURATION                              {0} SEC")),
-									FText::AsNumber(Settings->SpeedBoostDuration)))
-								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 17))
-								.ColorAndOpacity(SOTMUpgradeUIPrivate::SoftWhite)
-							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
-							[
-								SNew(STextBlock).Text(FText::Format(
-									FText::FromString(TEXT("COOLDOWN                            {0} SEC")),
-									FText::AsNumber(Settings->SpeedBoostCooldown)))
-								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 17))
-								.ColorAndOpacity(SOTMUpgradeUIPrivate::SoftWhite)
-							]
-						]
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 4.0f)
-					[
-						SAssignNew(AvailableCoinsText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 22))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::Gold)
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SAssignNew(CostText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 19))
-						.ColorAndOpacity(SOTMUpgradeUIPrivate::Gold)
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 10.0f)
-					[
-						SAssignNew(RequirementText, STextBlock)
-						.Justification(ETextJustify::Center)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 17))
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(80.0f, 0.0f, 80.0f, 8.0f)
-					[
-						SAssignNew(UnlockButton, SButton)
-						.HAlign(HAlign_Center)
-						.IsEnabled_Lambda([this]() { return CanPurchase(); })
-						.OnClicked_UObject(this, &ThisClass::HandleUnlockClicked)
-						[
-							SAssignNew(UnlockButtonText, STextBlock)
-							.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 19))
-						]
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 10.0f, 0.0f, 4.0f)
-					[
-						SAssignNew(LightningOwnershipText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 20))
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SAssignNew(LightningRequirementText, STextBlock)
-						.Justification(ETextJustify::Center)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16))
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(80.0f, 0.0f, 80.0f, 12.0f)
-					[
-						SAssignNew(LightningUnlockButton, SButton)
-						.HAlign(HAlign_Center)
-						.IsEnabled_Lambda([this]() { return CanPurchaseLightning(); })
-						.OnClicked_UObject(this, &ThisClass::HandleLightningUnlockClicked)
-						[
-							SAssignNew(LightningUnlockButtonText, STextBlock)
-							.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 19))
-						]
-					]
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
-					[
-						SNew(SButton)
-						.HAlign(HAlign_Center)
-						.Text(FText::FromString(TEXT("CLOSE")))
-						.OnClicked_UObject(this, &ThisClass::HandleCloseClicked)
-					]
-				]
-			]
-		];
-}
 
 void USOTMUpgradeStationWidget::NativeConstruct()
 {
@@ -193,6 +25,20 @@ void USOTMUpgradeStationWidget::NativeConstruct()
 	{
 		ObjectiveState->OnObjectiveChanged.AddUniqueDynamic(this, &ThisClass::HandleObjectiveChanged);
 	}
+	// Buttons are built in the WBP_UpgradeStation Designer canvas (BindWidgetOptional
+	// above), so their click handling is wired here instead of via SAssignNew/OnClicked_UObject.
+	if (UnlockButton)
+	{
+		UnlockButton->OnClicked.AddUniqueDynamic(this, &ThisClass::HandleUnlockClicked);
+	}
+	if (LightningUnlockButton)
+	{
+		LightningUnlockButton->OnClicked.AddUniqueDynamic(this, &ThisClass::HandleLightningUnlockClicked);
+	}
+	if (CloseButton)
+	{
+		CloseButton->OnClicked.AddUniqueDynamic(this, &ThisClass::HandleCloseClicked);
+	}
 	RefreshPresentation();
 	SetKeyboardFocus();
 }
@@ -209,6 +55,18 @@ void USOTMUpgradeStationWidget::NativeDestruct()
 	{
 		ObjectiveState->OnObjectiveChanged.RemoveDynamic(this, &ThisClass::HandleObjectiveChanged);
 	}
+	if (UnlockButton)
+	{
+		UnlockButton->OnClicked.RemoveDynamic(this, &ThisClass::HandleUnlockClicked);
+	}
+	if (LightningUnlockButton)
+	{
+		LightningUnlockButton->OnClicked.RemoveDynamic(this, &ThisClass::HandleLightningUnlockClicked);
+	}
+	if (CloseButton)
+	{
+		CloseButton->OnClicked.RemoveDynamic(this, &ThisClass::HandleCloseClicked);
+	}
 	PlayerState = nullptr;
 	ObjectiveState = nullptr;
 	Super::NativeDestruct();
@@ -218,7 +76,8 @@ FReply USOTMUpgradeStationWidget::NativeOnKeyDown(const FGeometry& InGeometry, c
 {
 	if (InKeyEvent.GetKey() == EKeys::Escape || InKeyEvent.GetKey() == EKeys::E)
 	{
-		return HandleCloseClicked();
+		HandleCloseClicked();
+		return FReply::Handled();
 	}
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
@@ -249,32 +108,57 @@ void USOTMUpgradeStationWidget::HandleObjectiveChanged(FSOTMObjectiveData Object
 	RefreshPresentation();
 }
 
-FReply USOTMUpgradeStationWidget::HandleUnlockClicked()
+// UnlockButton is the PRIORITY slot's button. It purchases whichever ability is
+// currently the priority (Speed Boost until owned, then Lightning Throw) - see the
+// class comment and RefreshPresentation() for how priority is decided.
+void USOTMUpgradeStationWidget::HandleUnlockClicked()
 {
 	if (UWorld* World = GetWorld())
 	{
 		if (USOTMDemoPhase3WorldSubsystem* Phase3 = World->GetSubsystem<USOTMDemoPhase3WorldSubsystem>())
 		{
-			LastPurchaseResult = Phase3->TryPurchaseSpeedBoost();
-			bHasAttemptedPurchase = true;
+			const bool bSpeedOwned = PlayerState && PlayerState->IsSpeedBoostUnlocked();
+			if (bSpeedOwned)
+			{
+				// Priority has moved on to Lightning Throw.
+				LastLightningResult = Phase3->TryPurchaseLightningThrow();
+				bHasAttemptedLightningPurchase = true;
+			}
+			else
+			{
+				LastPurchaseResult = Phase3->TryPurchaseSpeedBoost();
+				bHasAttemptedPurchase = true;
+			}
 		}
 	}
 	RefreshPresentation();
-	return FReply::Handled();
 }
 
-FReply USOTMUpgradeStationWidget::HandleLightningUnlockClicked()
+// LightningUnlockButton is the MINIMIZED slot's button - it mirrors whichever ability
+// is NOT the priority right now. Before Speed Boost is owned that's genuinely Lightning
+// (button stays disabled until Speed Boost is bought - see CanPurchaseLightning); after
+// Speed Boost is owned the minimized slot is Speed Boost itself, so this becomes a
+// harmless no-op (already owned, always disabled) kept for symmetry.
+void USOTMUpgradeStationWidget::HandleLightningUnlockClicked()
 {
 	if (UWorld* World = GetWorld())
 	{
 		if (USOTMDemoPhase3WorldSubsystem* Phase3 = World->GetSubsystem<USOTMDemoPhase3WorldSubsystem>())
 		{
-			LastLightningResult = Phase3->TryPurchaseLightningThrow();
-			bHasAttemptedLightningPurchase = true;
+			const bool bSpeedOwned = PlayerState && PlayerState->IsSpeedBoostUnlocked();
+			if (bSpeedOwned)
+			{
+				LastPurchaseResult = Phase3->TryPurchaseSpeedBoost();
+				bHasAttemptedPurchase = true;
+			}
+			else
+			{
+				LastLightningResult = Phase3->TryPurchaseLightningThrow();
+				bHasAttemptedLightningPurchase = true;
+			}
 		}
 	}
 	RefreshPresentation();
-	return FReply::Handled();
 }
 
 bool USOTMUpgradeStationWidget::CanPurchaseLightning() const
@@ -316,7 +200,7 @@ FText USOTMUpgradeStationWidget::GetLightningRequirementText() const
 	return FText::FromString(TEXT("READY TO UNLOCK"));
 }
 
-FReply USOTMUpgradeStationWidget::HandleCloseClicked()
+void USOTMUpgradeStationWidget::HandleCloseClicked()
 {
 	if (UWorld* World = GetWorld())
 	{
@@ -325,7 +209,6 @@ FReply USOTMUpgradeStationWidget::HandleCloseClicked()
 			Phase3->CloseUpgradeUI();
 		}
 	}
-	return FReply::Handled();
 }
 
 bool USOTMUpgradeStationWidget::CanPurchase() const
@@ -369,41 +252,114 @@ FText USOTMUpgradeStationWidget::GetRequirementText() const
 
 void USOTMUpgradeStationWidget::RefreshPresentation()
 {
-	if (!OwnershipText || !LevelText || !AvailableCoinsText || !CostText || !RequirementText || !UnlockButtonText)
-	{
-		return;
-	}
-	const bool bOwned = PlayerState && PlayerState->IsSpeedBoostUnlocked();
-	const int32 Level = PlayerState ? PlayerState->GetSpeedBoostLevel() : 0;
-	const int32 Available = PlayerState ? PlayerState->GetAvailableCoins() : 0;
-	const int32 Cost = GetDefault<USOTMPhase3Settings>()->SpeedBoostUnlockCost;
-	const FText Requirement = GetRequirementText();
-
-	OwnershipText->SetText(FText::FromString(bOwned ? TEXT("OWNED") : TEXT("LOCKED")));
-	OwnershipText->SetColorAndOpacity(bOwned ? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
-	LevelText->SetText(FText::Format(FText::FromString(TEXT("LEVEL {0} / 1")), FText::AsNumber(Level)));
-	AvailableCoinsText->SetText(FText::Format(FText::FromString(TEXT("YOUR COINS   {0}")), FText::AsNumber(Available)));
-	CostText->SetText(FText::Format(FText::FromString(TEXT("UNLOCK COST   {0}")), FText::AsNumber(Cost)));
-	RequirementText->SetText(Requirement);
-	RequirementText->SetColorAndOpacity(CanPurchase() || bOwned
-		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
-	UnlockButtonText->SetText(FText::FromString(bOwned ? TEXT("OWNED") : TEXT("UNLOCK SPEED BOOST")));
-
-	if (!LightningOwnershipText || !LightningRequirementText || !LightningUnlockButtonText)
-	{
-		return;
-	}
+	// Text content, which ability is shown where, and button enabled state are all
+	// driven from here; colors/layout stay fully Designer-controlled in WBP_UpgradeStation.
+	//
+	// Priority: Speed Boost is the priority ability until it's owned, then Lightning
+	// Throw becomes the priority (it can't be bought before Speed Boost anyway - see
+	// CanPurchaseLightning). The priority ability always fills the big widget group;
+	// the other one is squeezed into the small "Lightning..."-named group, whichever
+	// ability that actually is right now.
+	const bool bSpeedOwned = PlayerState && PlayerState->IsSpeedBoostUnlocked();
 	const bool bLightningOwned = PlayerState && PlayerState->IsLightningThrowUnlocked();
-	const int32 LightningCost = GetDefault<USOTMLightningThrowSettings>()->LightningThrowUnlockCost;
-	LightningOwnershipText->SetText(FText::Format(
-		FText::FromString(TEXT("LIGHTNING THROW   {0}   -   COST {1}")),
-		FText::FromString(bLightningOwned ? TEXT("OWNED") : TEXT("LOCKED")),
-		FText::AsNumber(LightningCost)));
-	LightningOwnershipText->SetColorAndOpacity(bLightningOwned
-		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
-	LightningRequirementText->SetText(GetLightningRequirementText());
-	LightningRequirementText->SetColorAndOpacity(CanPurchaseLightning() || bLightningOwned
-		? SOTMUpgradeUIPrivate::Green : SOTMUpgradeUIPrivate::Red);
-	LightningUnlockButtonText->SetText(FText::FromString(
-		bLightningOwned ? TEXT("OWNED") : TEXT("UNLOCK LIGHTNING THROW")));
+	const bool bPriorityIsLightning = bSpeedOwned;
+
+	const USOTMPhase3Settings* Phase3Settings = GetDefault<USOTMPhase3Settings>();
+	const USOTMLightningThrowSettings* LightningSettings = GetDefault<USOTMLightningThrowSettings>();
+
+	// --- Priority (big) group -------------------------------------------------
+	const bool bPriorityOwned = bPriorityIsLightning ? bLightningOwned : bSpeedOwned;
+	const int32 Available = PlayerState ? PlayerState->GetAvailableCoins() : 0;
+	const int32 PriorityCost = bPriorityIsLightning
+		? LightningSettings->LightningThrowUnlockCost
+		: Phase3Settings->SpeedBoostUnlockCost;
+	const int32 PriorityLevel = bPriorityIsLightning
+		? (bLightningOwned ? 1 : 0)
+		: (PlayerState ? PlayerState->GetSpeedBoostLevel() : 0);
+
+	if (AbilityNameText)
+	{
+		AbilityNameText->SetText(FText::FromString(bPriorityIsLightning ? TEXT("LIGHTNING THROW") : TEXT("SPEED BOOST")));
+	}
+	if (OwnershipText)
+	{
+		OwnershipText->SetText(FText::FromString(bPriorityOwned ? TEXT("OWNED") : TEXT("LOCKED")));
+	}
+	if (DescriptionText)
+	{
+		DescriptionText->SetText(FText::FromString(bPriorityIsLightning
+			? TEXT("Throws a bolt that stuns nearby Cousins for a short time.\nPress [F] during Forest gameplay.")
+			: TEXT("Temporarily increases movement speed.\nPress [Q] during Forest gameplay.")));
+	}
+	if (LevelText)
+	{
+		LevelText->SetText(FText::Format(FText::FromString(TEXT("LEVEL {0} / 1")), FText::AsNumber(PriorityLevel)));
+	}
+	if (SpeedIncreaseText)
+	{
+		SpeedIncreaseText->SetText(bPriorityIsLightning
+			? FText::Format(FText::FromString(TEXT("RANGE   {0}")),
+				FText::AsNumber(FMath::RoundToInt(LightningSettings->LightningThrowRange)))
+			: FText::Format(FText::FromString(TEXT("SPEED INCREASE   +{0}%")),
+				FText::AsNumber(FMath::RoundToInt((Phase3Settings->SpeedBoostMultiplier - 1.0f) * 100.0f))));
+	}
+	if (DurationText)
+	{
+		DurationText->SetText(bPriorityIsLightning
+			? FText::Format(FText::FromString(TEXT("STUN DURATION   {0} SEC")), FText::AsNumber(LightningSettings->StunDuration))
+			: FText::Format(FText::FromString(TEXT("DURATION   {0} SEC")), FText::AsNumber(Phase3Settings->SpeedBoostDuration)));
+	}
+	if (CooldownText)
+	{
+		CooldownText->SetText(FText::Format(FText::FromString(TEXT("COOLDOWN   {0} SEC")),
+			FText::AsNumber(bPriorityIsLightning ? LightningSettings->LightningThrowCooldown : Phase3Settings->SpeedBoostCooldown)));
+	}
+	if (AvailableCoinsText)
+	{
+		AvailableCoinsText->SetText(FText::Format(FText::FromString(TEXT("YOUR COINS   {0}")), FText::AsNumber(Available)));
+	}
+	if (CostText)
+	{
+		CostText->SetText(FText::Format(FText::FromString(TEXT("UNLOCK COST   {0}")), FText::AsNumber(PriorityCost)));
+	}
+	if (RequirementText)
+	{
+		RequirementText->SetText(bPriorityIsLightning ? GetLightningRequirementText() : GetRequirementText());
+	}
+	if (UnlockButtonText)
+	{
+		UnlockButtonText->SetText(FText::FromString(bPriorityOwned
+			? TEXT("OWNED")
+			: (bPriorityIsLightning ? TEXT("UNLOCK LIGHTNING THROW") : TEXT("UNLOCK SPEED BOOST"))));
+	}
+	if (UnlockButton)
+	{
+		UnlockButton->SetIsEnabled(bPriorityIsLightning ? CanPurchaseLightning() : CanPurchase());
+	}
+
+	// --- Minimized (small) group ------------------------------------------------
+	// Always the ability that ISN'T the priority right now: Lightning Throw before
+	// Speed Boost is owned, Speed Boost itself afterward.
+	const bool bSecondaryOwned = bPriorityIsLightning ? bSpeedOwned : bLightningOwned;
+	if (LightningOwnershipText)
+	{
+		LightningOwnershipText->SetText(FText::Format(
+			FText::FromString(TEXT("{0}   {1}")),
+			FText::FromString(bPriorityIsLightning ? TEXT("SPEED BOOST") : TEXT("LIGHTNING THROW")),
+			FText::FromString(bSecondaryOwned ? TEXT("OWNED") : TEXT("LOCKED"))));
+	}
+	if (LightningRequirementText)
+	{
+		LightningRequirementText->SetText(bPriorityIsLightning ? GetRequirementText() : GetLightningRequirementText());
+	}
+	if (LightningUnlockButtonText)
+	{
+		LightningUnlockButtonText->SetText(FText::FromString(bSecondaryOwned
+			? TEXT("OWNED")
+			: (bPriorityIsLightning ? TEXT("UNLOCK SPEED BOOST") : TEXT("UNLOCK LIGHTNING THROW"))));
+	}
+	if (LightningUnlockButton)
+	{
+		LightningUnlockButton->SetIsEnabled(bPriorityIsLightning ? CanPurchase() : CanPurchaseLightning());
+	}
 }

@@ -12,7 +12,7 @@ class SOTM1_API USOTMLightningThrowSettings final : public UDeveloperSettings
 
 public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Purchase", meta=(ClampMin="1"))
-	int32 LightningThrowUnlockCost = 60;
+	int32 LightningThrowUnlockCost = 5; // TEMP: testing cost, was 60
 
 	/** Design doc calls for a short cooldown, shorter than the Speed Boost. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Throw", meta=(ClampMin="0.1", ClampMax="60.0"))

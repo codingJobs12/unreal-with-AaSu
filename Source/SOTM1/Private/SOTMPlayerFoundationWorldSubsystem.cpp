@@ -13,6 +13,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Misc/PackageName.h"
 #include "ShowFlags.h"
+#include "SOTMFlashlightFixComponent.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "TimerManager.h"
@@ -135,6 +136,19 @@ void USOTMPlayerFoundationWorldSubsystem::TryBindPlayer()
 			RF_Transient);
 		Pawn->AddInstanceComponent(Vitals);
 		Vitals->RegisterComponent();
+	}
+
+	// Flashlight source-radius + anti-flicker fix, added the same way as Vitals above -
+	// see USOTMFlashlightFixComponent's class comment for what it does and why.
+	if (!Pawn->FindComponentByClass<USOTMFlashlightFixComponent>())
+	{
+		USOTMFlashlightFixComponent* FlashlightFix = NewObject<USOTMFlashlightFixComponent>(
+			Pawn,
+			USOTMFlashlightFixComponent::StaticClass(),
+			TEXT("SOTM_FlashlightFix"),
+			RF_Transient);
+		Pawn->AddInstanceComponent(FlashlightFix);
+		FlashlightFix->RegisterComponent();
 	}
 
 	if (UGameInstance* GameInstance = World->GetGameInstance())
