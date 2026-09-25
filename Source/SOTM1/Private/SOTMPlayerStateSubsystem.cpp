@@ -418,20 +418,33 @@ ESOTMLightningThrowPurchaseResult USOTMPlayerStateSubsystem::TryPurchaseLightnin
 	return ESOTMLightningThrowPurchaseResult::Success;
 }
 
-bool USOTMPlayerStateSubsystem::CommitPhase4ChestOpenedAndKey()
+bool USOTMPlayerStateSubsystem::CommitPhase4ChestOpened()
 {
-	if (bPhase4ChestOpened || bPhase4HasGateKey)
+	if (bPhase4ChestOpened)
 	{
-		return bPhase4ChestOpened && bPhase4HasGateKey;
+		return true;
 	}
-	const bool bPreviousChest = bPhase4ChestOpened;
-	const bool bPreviousKey = bPhase4HasGateKey;
 	bPhase4ChestOpened = true;
-	bPhase4HasGateKey = true;
 	if (!SavePlayerStateInternal(TEXT("Phase4ChestOpened")))
 	{
-		bPhase4ChestOpened = bPreviousChest;
-		bPhase4HasGateKey = bPreviousKey;
+		bPhase4ChestOpened = false;
+		return false;
+	}
+	OnPhase4ProgressChanged.Broadcast(
+		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
+	return true;
+}
+
+bool USOTMPlayerStateSubsystem::CommitPhase4GateKey()
+{
+	if (bPhase4HasGateKey)
+	{
+		return true;
+	}
+	bPhase4HasGateKey = true;
+	if (!SavePlayerStateInternal(TEXT("Phase4GateKey")))
+	{
+		bPhase4HasGateKey = false;
 		return false;
 	}
 	OnPhase4ProgressChanged.Broadcast(

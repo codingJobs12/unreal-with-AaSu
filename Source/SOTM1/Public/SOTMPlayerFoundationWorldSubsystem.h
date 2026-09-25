@@ -44,6 +44,7 @@ private:
 
 	void NormalizeCH1RenderState(UWorld& World, APlayerController* PlayerController, APawn* Pawn);
 	void NormalizeProductionCamera(APawn* Pawn);
+	void AttachFlashlightToSocket(APawn* Pawn);
 	static FName GetNormalizedMapPackageName(const UWorld* World);
 
 #if !UE_BUILD_SHIPPING

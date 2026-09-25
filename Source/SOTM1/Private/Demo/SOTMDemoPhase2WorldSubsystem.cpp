@@ -831,7 +831,15 @@ void USOTMDemoPhase2WorldSubsystem::SpawnProductionCousins(const TArray<FTransfo
 
 void USOTMDemoPhase2WorldSubsystem::NotifyCousinDetected(ASOTMCousinAIController* Controller)
 {
-	if (!Controller || WarnedControllers.Contains(Controller) || bCatchActive)
+	// NOTE: previously also gated on "WarnedControllers.Contains(Controller)" to avoid
+	// re-triggering. That's redundant (the AI controller only calls this on a genuinely
+	// new encounter) and caused a real bug: once the panel auto-hid after 1.8s, the SAME
+	// Cousin losing and regaining sight of the player (a flicker, not a full encounter
+	// end) would be treated as a new encounter upstream, but this gate silently swallowed
+	// it because the controller was never removed from WarnedControllers - so the
+	// "spotted" panel sometimes just didn't show. Removed; the panel now always shows
+	// (and its hide timer resets) on every genuinely new detection.
+	if (!Controller || bCatchActive)
 	{
 		return;
 	}

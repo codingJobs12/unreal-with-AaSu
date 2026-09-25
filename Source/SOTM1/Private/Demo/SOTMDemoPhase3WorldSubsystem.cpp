@@ -1,6 +1,7 @@
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 
 #include "Ability/SOTMPhase3Settings.h"
+#include "Ability/SOTMSpeedBoostComponent.h"
 #include "Ability/SOTMLightningThrowSettings.h"
 #include "Ability/SOTMTimmyUpgradeStation.h"
 #include "AI/SOTMCousinAIController.h"
@@ -36,6 +37,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogSOTMPhase3, Log, All);
 namespace SOTMPhase3Private
 {
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
+	const TCHAR* CharacterOnFootContextPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IMC_CharacterOnFoot.IMC_CharacterOnFoot");
+	const TCHAR* SprintActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Sprint.IA_Sprint");
 	const TCHAR* InteractActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Interact.IA_Interact");
 	const TCHAR* StationOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_StationOpen.SFX_TEMP_StationOpen");
 	const TCHAR* DeniedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Denied.SFX_TEMP_Denied");
@@ -418,7 +421,9 @@ void USOTMDemoPhase3WorldSubsystem::BindToPlacedTimmyStation()
 
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Bound to placed Timmy station %s at %s"),
 		*StationActor->GetName(), *StationActor->GetActorLocation().ToCompactString());
-}void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
+}
+
+void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
 {
 	UWorld* World = GetWorld();
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
@@ -452,10 +457,58 @@ void USOTMDemoPhase3WorldSubsystem::BindToPlacedTimmyStation()
 	Phase3InputContext = NewObject<UInputMappingContext>(this, TEXT("IMC_SOTM_Phase3"));
 	Phase3InputContext->MapKey(SpeedBoostInputAction, EKeys::Q);
 	InputSubsystem->AddMappingContext(Phase3InputContext, 50);
+	if (GetDefault<USOTMPhase3Settings>()->bDisableShiftTestSprint)
+	{
+		BlockShiftTestSprint(InputSubsystem);
+	}
 	FEnhancedInputActionEventBinding& BoostBinding = EnhancedInput->BindAction(
 		SpeedBoostInputAction, ETriggerEvent::Started, this, &ThisClass::HandleSpeedBoostInput);
 	SpeedBoostBindingHandle = BoostBinding.GetHandle();
 	BoundEnhancedInput = EnhancedInput;
+}
+
+// Disables the Shift test sprint without touching the character Blueprint or the input
+// assets: every key IMC_CharacterOnFoot maps to IA_Sprint is also mapped, in a much
+// higher-priority context, to an empty action that consumes the input. Enhanced Input then
+// never delivers those keys to IA_Sprint, so the Blueprint's sprint (12000 speed + stamina
+// drain) simply never fires. Removing this context turns Shift back on.
+void USOTMDemoPhase3WorldSubsystem::BlockShiftTestSprint(UEnhancedInputLocalPlayerSubsystem* InputSubsystem)
+{
+	if (!InputSubsystem || SprintBlockContext)
+	{
+		return;
+	}
+
+	TArray<FKey> SprintKeys;
+	const UInputMappingContext* OnFootContext = LoadObject<UInputMappingContext>(nullptr, SOTMPhase3Private::CharacterOnFootContextPath);
+	const UInputAction* SprintAction = LoadObject<UInputAction>(nullptr, SOTMPhase3Private::SprintActionPath);
+	if (OnFootContext && SprintAction)
+	{
+		for (const FEnhancedActionKeyMapping& Mapping : OnFootContext->GetMappings())
+		{
+			if (Mapping.Action == SprintAction)
+			{
+				SprintKeys.AddUnique(Mapping.Key);
+			}
+		}
+	}
+	if (SprintKeys.IsEmpty())
+	{
+		SprintKeys.Add(EKeys::LeftShift); // fallback if the assets could not be read
+	}
+
+	SprintBlockAction = NewObject<UInputAction>(this, TEXT("IA_SOTM_BlockShiftSprint"));
+	SprintBlockAction->ValueType = EInputActionValueType::Boolean;
+	SprintBlockAction->bConsumeInput = true;
+	SprintBlockContext = NewObject<UInputMappingContext>(this, TEXT("IMC_SOTM_BlockShiftSprint"));
+	FString KeyNames;
+	for (const FKey& Key : SprintKeys)
+	{
+		SprintBlockContext->MapKey(SprintBlockAction, Key);
+		KeyNames += Key.ToString() + TEXT(" ");
+	}
+	InputSubsystem->AddMappingContext(SprintBlockContext, 1000);
+	UE_LOG(LogSOTMPhase3, Display, TEXT("Shift test sprint disabled (blocked keys: %s)"), *KeyNames);
 }
 
 void USOTMDemoPhase3WorldSubsystem::UnbindProductionInput()
@@ -484,11 +537,17 @@ void USOTMDemoPhase3WorldSubsystem::UnbindProductionInput()
 					{
 						InputSubsystem->RemoveMappingContext(Phase3InputContext);
 					}
+					if (SprintBlockContext)
+					{
+						InputSubsystem->RemoveMappingContext(SprintBlockContext);
+					}
 				}
 			}
 		}
 	}
 	BoundEnhancedInput.Reset();
+	SprintBlockContext = nullptr;
+	SprintBlockAction = nullptr;
 	InteractBindingHandle = 0;
 	SpeedBoostBindingHandle = 0;
 }
@@ -669,18 +728,15 @@ bool USOTMDemoPhase3WorldSubsystem::TryActivateSpeedBoost()
 	{
 		return false;
 	}
-	UCharacterMovementComponent* Movement = ResolveMovementComponent();
 	UWorld* World = GetWorld();
-	if (!Movement || !World)
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	USOTMSpeedBoostComponent* Boost = USOTMSpeedBoostComponent::FindOrAddTo(PC ? PC->GetPawn() : nullptr);
+	const USOTMPhase3Settings* Settings = GetDefault<USOTMPhase3Settings>();
+	if (!World || !Boost || !Boost->StartBoost(Settings->SpeedBoostMultiplier))
 	{
 		return false;
 	}
-
-	const USOTMPhase3Settings* Settings = GetDefault<USOTMPhase3Settings>();
-	BoostedMovement = Movement;
-	BaseSpeedBeforeBoost = FMath::Max(1.0f, Movement->MaxWalkSpeed);
-	LastAppliedBoostedSpeed = BaseSpeedBeforeBoost * Settings->SpeedBoostMultiplier;
-	Movement->MaxWalkSpeed = LastAppliedBoostedSpeed;
+	ActiveBoostComponent = Boost;
 	World->GetTimerManager().SetTimer(ActiveTimer, this, &ThisClass::FinishActiveSpeedBoost,
 		Settings->SpeedBoostDuration, false);
 	World->GetTimerManager().SetTimer(PresentationTimer, this, &ThisClass::UpdateRuntimePresentation,
@@ -691,9 +747,8 @@ bool USOTMDemoPhase3WorldSubsystem::TryActivateSpeedBoost()
 		ActiveBoostAudio = UGameplayStatics::SpawnSound2D(
 			this, Sound, 0.34f, 1.0f, 0.0f, nullptr, false, false);
 	}
-	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost ACTIVE base=%.1f boosted=%.1f multiplier=%.2f duration=%.1f"),
-		BaseSpeedBeforeBoost, LastAppliedBoostedSpeed, Settings->SpeedBoostMultiplier,
-		Settings->SpeedBoostDuration);
+	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost ACTIVE multiplier=%.2f duration=%.1f"),
+		Settings->SpeedBoostMultiplier, Settings->SpeedBoostDuration);
 	return true;
 }
 
@@ -735,18 +790,8 @@ void USOTMDemoPhase3WorldSubsystem::UpdateRuntimePresentation()
 	}
 	if (RuntimeState == ESOTMSpeedBoostRuntimeState::Active)
 	{
-		if (UCharacterMovementComponent* Movement = BoostedMovement.Get())
-		{
-			// If sprint or another legitimate modifier changed MaxWalkSpeed after the
-			// previous application, adopt that value as the new unboosted base.
-			if (!FMath::IsNearlyEqual(Movement->MaxWalkSpeed, LastAppliedBoostedSpeed, 1.0f))
-			{
-				BaseSpeedBeforeBoost = FMath::Max(1.0f, Movement->MaxWalkSpeed);
-			}
-			LastAppliedBoostedSpeed = BaseSpeedBeforeBoost *
-				GetDefault<USOTMPhase3Settings>()->SpeedBoostMultiplier;
-			Movement->MaxWalkSpeed = LastAppliedBoostedSpeed;
-		}
+		// HUD countdown only - the movement effect is applied every frame by
+		// USOTMSpeedBoostComponent on the pawn.
 		const float Remaining = FMath::Max(0.0f, World->GetTimerManager().GetTimerRemaining(ActiveTimer));
 		SetRuntimeState(RuntimeState, Remaining);
 	}
@@ -777,13 +822,11 @@ void USOTMDemoPhase3WorldSubsystem::SetRuntimeState(
 
 void USOTMDemoPhase3WorldSubsystem::RestoreMovementSpeed()
 {
-	if (UCharacterMovementComponent* Movement = BoostedMovement.Get())
+	if (USOTMSpeedBoostComponent* Boost = ActiveBoostComponent.Get())
 	{
-		Movement->MaxWalkSpeed = FMath::Max(1.0f, BaseSpeedBeforeBoost);
+		Boost->StopBoost();
 	}
-	BoostedMovement.Reset();
-	BaseSpeedBeforeBoost = 0.0f;
-	LastAppliedBoostedSpeed = 0.0f;
+	ActiveBoostComponent.Reset();
 }
 
 void USOTMDemoPhase3WorldSubsystem::ResetRuntimeAfterDeath()

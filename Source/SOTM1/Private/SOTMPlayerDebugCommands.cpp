@@ -1,5 +1,8 @@
 #include "SOTMPlayerBlueprintLibrary.h"
 
+#include "AI/SOTMCousinCharacter.h"
+#include "EngineUtils.h"
+
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -87,6 +90,44 @@ namespace SOTMPlayerDebugCommands
 		}
 	}
 
+	// Teleports the nearest Forest Cousin right in front of the player, so abilities that
+	// need a Cousin (Lightning Throw, etc.) can be tested instantly instead of having to
+	// walk the forest to find one.
+	void BringCousinHere(const TArray<FString>& Args, UWorld* World)
+	{
+		(void)Args;
+		AActor* Player = GetPlayer(World);
+		if (!World || !Player)
+		{
+			return;
+		}
+
+		ASOTMCousinCharacter* Nearest = nullptr;
+		float NearestDistanceSq = TNumericLimits<float>::Max();
+		for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
+		{
+			const float DistanceSq = FVector::DistSquared(It->GetActorLocation(), Player->GetActorLocation());
+			if (DistanceSq < NearestDistanceSq)
+			{
+				NearestDistanceSq = DistanceSq;
+				Nearest = *It;
+			}
+		}
+		if (!Nearest)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SOTM.Cousin.BringHere: no ASOTMCousinCharacter exists in this level."));
+			return;
+		}
+
+		// 250 units in front of the player, same height - close enough for Lightning Throw's
+		// default 2200 range and hit radius without needing to aim carefully.
+		const FVector TargetLocation = Player->GetActorLocation()
+			+ Player->GetActorForwardVector() * 250.0f;
+		Nearest->TeleportTo(TargetLocation, Nearest->GetActorRotation());
+		UE_LOG(LogTemp, Display, TEXT("SOTM.Cousin.BringHere: teleported %s to %s"),
+			*Nearest->GetName(), *TargetLocation.ToCompactString());
+	}
+
 	void Retry(const TArray<FString>& Args, UWorld* World)
 	{
 		if (USOTMPlayerStateSubsystem* State = GetState(World))
@@ -129,6 +170,11 @@ namespace SOTMPlayerDebugCommands
 		TEXT("SOTM.Player.Load"),
 		TEXT("Load player state from the active Menu System Pro save slot."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&Load));
+
+	FAutoConsoleCommandWithWorldAndArgs BringCousinHereCommand(
+		TEXT("SOTM.Cousin.BringHere"),
+		TEXT("Teleport the nearest Forest Cousin to just in front of the player, for fast testing."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&BringCousinHere));
 
 	FAutoConsoleCommandWithWorldAndArgs RetryCommand(
 		TEXT("SOTM.Player.Retry"),

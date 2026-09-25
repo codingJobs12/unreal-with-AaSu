@@ -21,9 +21,16 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Throw", meta=(ClampMin="100.0", ClampMax="6000.0"))
 	float LightningThrowRange = 2200.0f;
 
-	/** Radius around the impact point that a Cousin must be within to be stunned. */
+	/** Radius around the impact point that a Cousin must be within to be stunned. Kept for
+	 *  back-compat/Blueprint use; the runtime targeting now uses the cone angle below. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Throw", meta=(ClampMin="25.0", ClampMax="1500.0"))
 	float LightningThrowHitRadius = 260.0f;
+
+	/** Half-angle (degrees) of the forgiving aim cone in front of the player. A Cousin
+	 *  anywhere inside this cone (and in range, and visible) can be stunned, not just one
+	 *  standing exactly dead-centre of the crosshair. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Throw", meta=(ClampMin="1.0", ClampMax="90.0"))
+	float LightningThrowConeHalfAngleDegrees = 25.0f;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Stun", meta=(ClampMin="0.5", ClampMax="60.0"))
 	float StunDuration = 5.0f;

@@ -3,6 +3,7 @@
 #include "AI/SOTMCousinAIController.h"
 #include "Animation/AnimInstance.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -43,6 +44,19 @@ ASOTMCousinCharacter::ASOTMCousinCharacter()
 	GetCharacterMovement()->BrakingDecelerationWalking = 900.0f;
 	GetCharacterMovement()->bUseRVOAvoidance = true;
 	GetCharacterMovement()->AvoidanceWeight = 0.45f;
+
+	// Glowing marker light, visible from far across the dark forest, so the player can
+	// spot a Cousin (and aim Lightning Throw at them) without needing the flashlight on
+	// them first.
+	AlertLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("AlertLight"));
+	AlertLight->SetupAttachment(GetCapsuleComponent());
+	AlertLight->SetRelativeLocation(FVector(0.0f, 0.0f, 90.0f));
+	AlertLight->SetLightColor(FLinearColor(1.0f, 0.15f, 0.05f));
+	AlertLight->Intensity = 8000.0f;
+	AlertLight->AttenuationRadius = 5000.0f;
+	AlertLight->SourceRadius = 8.0f;
+	AlertLight->CastShadows = false;
+	AlertLight->SetMobility(EComponentMobility::Movable);
 }
 
 void ASOTMCousinCharacter::SetPresentationVariant(const int32 InVariantIndex)

@@ -13,6 +13,7 @@ class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
 class USOTMPlayerStateSubsystem;
+class USOTMSpeedBoostComponent;
 class USOTMUpgradeStationWidget;
 
 /** CH1-only Phase 3 station, purchase, input and runtime Speed Boost coordinator. */
@@ -61,6 +62,7 @@ private:
 	void BindToPlacedTimmyStation();
 	void BindProductionInput();
 	void UnbindProductionInput();
+	void BlockShiftTestSprint(class UEnhancedInputLocalPlayerSubsystem* InputSubsystem);
 	void HandleInteractInput();
 	void HandleSpeedBoostInput();
 	void HandleStationEntered(AActor* Actor);
@@ -111,6 +113,13 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> Phase3InputContext;
 
+	/** Higher-priority context that swallows the Shift test sprint keys (see BlockShiftTestSprint). */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> SprintBlockContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> SprintBlockAction;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> ActiveBoostAudio;
 
@@ -121,9 +130,8 @@ private:
 	bool bUpgradeInputLockHeld = false;
 	bool bPreviousMouseCursor = false;
 	ESOTMSpeedBoostRuntimeState RuntimeState = ESOTMSpeedBoostRuntimeState::Locked;
-	TWeakObjectPtr<UCharacterMovementComponent> BoostedMovement;
-	float BaseSpeedBeforeBoost = 0.0f;
-	float LastAppliedBoostedSpeed = 0.0f;
+	/** Pawn component that applies the movement effect while Active. */
+	TWeakObjectPtr<USOTMSpeedBoostComponent> ActiveBoostComponent;
 	FTimerHandle InitializeTimer;
 	FTimerHandle ActiveTimer;
 	FTimerHandle CooldownTimer;

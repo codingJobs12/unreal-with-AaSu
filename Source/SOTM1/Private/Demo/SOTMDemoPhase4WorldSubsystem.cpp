@@ -2,6 +2,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "AI/SOTMCousinCharacter.h"
+#include "Demo/SOTMChestActor.h"
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Demo/SOTMPhase4Interactable.h"
 #include "EnhancedInputComponent.h"
@@ -28,7 +29,6 @@ namespace SOTMPhase4Private
 {
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* InteractActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Interact.IA_Interact");
-	const TCHAR* ChestMeshPath = TEXT("/Game/Chest_Keys/chest.chest");
 	const TCHAR* GateMeshPath = TEXT("/Game/Fab/Main_gate_entrance/main_gate_entrance/StaticMeshes/main_gate_entrance.main_gate_entrance");
 	const TCHAR* KeyMeshPath = TEXT("/Game/Chest_Keys/GateKeys.GateKeys");
 	const TCHAR* ChestOpenSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_ChestOpen.SFX_TEMP_ChestOpen");
@@ -84,9 +84,12 @@ void USOTMDemoPhase4WorldSubsystem::Deinitialize()
 	}
 	if (ChestAnchor) ChestAnchor->Destroy();
 	if (GateAnchor) GateAnchor->Destroy();
+	if (KeyAnchor) KeyAnchor->Destroy();
 	if (KeyPresentation) KeyPresentation->Destroy();
+	if (ChestArt) ChestArt->Destroy();
 	ChestAnchor = nullptr;
 	GateAnchor = nullptr;
+	KeyAnchor = nullptr;
 	KeyPresentation = nullptr;
 	ChestArt = nullptr;
 	GateArt = nullptr;
@@ -144,15 +147,13 @@ void USOTMDemoPhase4WorldSubsystem::FindProductionArtAndCreateAnchors()
 	{
 		return;
 	}
-	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+	// BP_Chest (ASOTMChestActor) is hand-placed in the level now, same as GateArt below -
+	// found here rather than spawned, so wherever it's placed in the editor is where it
+	// plays.
+	for (TActorIterator<ASOTMChestActor> It(World); It; ++It)
 	{
-		UStaticMeshComponent* Component = It->GetStaticMeshComponent();
-		const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
-		if (Mesh && Mesh->GetPathName() == SOTMPhase4Private::ChestMeshPath)
-		{
-			ChestArt = *It;
-			break;
-		}
+		ChestArt = *It;
+		break;
 	}
 	if (ChestArt)
 	{
@@ -166,7 +167,7 @@ void USOTMDemoPhase4WorldSubsystem::FindProductionArtAndCreateAnchors()
 			{
 				continue;
 			}
-			const float DistanceSq = FVector::DistSquared(ChestArt->GetActorLocation(), It->GetActorLocation());
+			const float DistanceSq = FVector::DistSquared(ChestClosedTransform.GetLocation(), It->GetActorLocation());
 			if (DistanceSq < NearestGateSq)
 			{
 				NearestGateSq = DistanceSq;
@@ -188,7 +189,7 @@ void USOTMDemoPhase4WorldSubsystem::FindProductionArtAndCreateAnchors()
 			ASOTMPhase4Interactable::StaticClass(), ChestArt->GetActorLocation(), FRotator::ZeroRotator, Params);
 		if (ChestAnchor)
 		{
-			ChestAnchor->Configure(ESOTMPhase4InteractableKind::Chest, 1500.0f);
+			ChestAnchor->Configure(ESOTMPhase4InteractableKind::Chest, 250.0f);
 			ChestAnchor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleEntered);
 			ChestAnchor->OnPlayerExited.AddUObject(this, &ThisClass::HandleExited);
 		}
@@ -256,7 +257,13 @@ void USOTMDemoPhase4WorldSubsystem::HandleInteractInput()
 	{
 		return;
 	}
-	if (bNearChest)
+	// Key takes priority: once the chest is open and the key is out, that's the only thing
+	// pressing E near the chest should do until it's actually picked up.
+	if (bNearKey)
+	{
+		InteractWithKey();
+	}
+	else if (bNearChest)
 	{
 		InteractWithChest();
 	}
@@ -273,6 +280,7 @@ void USOTMDemoPhase4WorldSubsystem::HandleEntered(const ESOTMPhase4InteractableK
 		return;
 	}
 	if (Kind == ESOTMPhase4InteractableKind::Chest) bNearChest = true;
+	else if (Kind == ESOTMPhase4InteractableKind::Key) bNearKey = true;
 	else bNearGate = true;
 	RefreshPrompt();
 }
@@ -284,6 +292,7 @@ void USOTMDemoPhase4WorldSubsystem::HandleExited(const ESOTMPhase4InteractableKi
 		return;
 	}
 	if (Kind == ESOTMPhase4InteractableKind::Chest) bNearChest = false;
+	else if (Kind == ESOTMPhase4InteractableKind::Key) bNearKey = false;
 	else bNearGate = false;
 	RefreshPrompt();
 }
@@ -293,6 +302,11 @@ void USOTMDemoPhase4WorldSubsystem::RefreshPrompt()
 	if (!PlayerState || PlayerState->IsPlayerDead() || PlayerState->IsGameOver())
 	{
 		OnPromptChanged.Broadcast(false, FText::GetEmpty());
+		return;
+	}
+	if (bNearKey && !PlayerState->HasPhase4GateKey())
+	{
+		OnPromptChanged.Broadcast(true, NSLOCTEXT("SOTM", "CollectKeyPrompt", "[E]  COLLECT KEY"));
 		return;
 	}
 	if (bNearChest)
@@ -336,21 +350,12 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithChest()
 		{
 			UGameplayStatics::PlaySoundAtLocation(this, Sound, ChestArt ? ChestArt->GetActorLocation() : FVector::ZeroVector, 0.60f);
 		}
-		if (UWorld* World = GetWorld())
-		{
-			FTimerHandle KeySoundTimer;
-			World->GetTimerManager().SetTimer(KeySoundTimer, FTimerDelegate::CreateWeakLambda(this, [this]
-			{
-				if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::KeyAcquiredSound))
-				{
-					UGameplayStatics::PlaySound2D(this, Sound, 0.58f);
-				}
-			}), 0.52f, false);
-		}
+		// Opening the chest only reveals the key now - it isn't collected (and the objective
+		// doesn't update) until the player walks up and presses E on it. See InteractWithKey.
 		BeginChestPresentation(false);
 		OnNotification.Broadcast(
-			NSLOCTEXT("SOTM", "GateKeyAcquired", "GATE KEY ACQUIRED"),
-			NSLOCTEXT("SOTM", "ReachGateUpdated", "OBJECTIVE UPDATED  -  REACH THE GATE"));
+			NSLOCTEXT("SOTM", "ChestOpened", "CHEST OPENED"),
+			NSLOCTEXT("SOTM", "TakeTheKey", "TAKE THE KEY"));
 	}
 	else if (Result != ESOTMPhase4ActionResult::AlreadyCompleted)
 	{
@@ -364,6 +369,40 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithChest()
 	}
 	RefreshPrompt();
 	UE_LOG(LogSOTMPhase4, Display, TEXT("Chest interaction result=%d"), static_cast<int32>(Result));
+}
+
+void USOTMDemoPhase4WorldSubsystem::InteractWithKey()
+{
+	if (!Objectives || !PlayerState || PlayerState->HasPhase4GateKey())
+	{
+		return;
+	}
+	const ESOTMPhase4ActionResult Result = Objectives->TryCollectPhase4GateKey();
+	if (Result == ESOTMPhase4ActionResult::Success)
+	{
+		if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase4Private::KeyAcquiredSound))
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, 0.58f);
+		}
+		// The key has been picked up - clear the visual and its interaction anchor so it can't
+		// be collected again.
+		if (KeyAnchor)
+		{
+			KeyAnchor->Destroy();
+			KeyAnchor = nullptr;
+		}
+		if (KeyPresentation)
+		{
+			KeyPresentation->Destroy();
+			KeyPresentation = nullptr;
+		}
+		bNearKey = false;
+		OnNotification.Broadcast(
+			NSLOCTEXT("SOTM", "GateKeyAcquired", "GATE KEY ACQUIRED"),
+			NSLOCTEXT("SOTM", "ReachGateUpdated", "OBJECTIVE UPDATED  -  REACH THE GATE"));
+	}
+	RefreshPrompt();
+	UE_LOG(LogSOTMPhase4, Display, TEXT("Key interaction result=%d"), static_cast<int32>(Result));
 }
 
 void USOTMDemoPhase4WorldSubsystem::InteractWithGate()
@@ -405,11 +444,13 @@ void USOTMDemoPhase4WorldSubsystem::BeginChestPresentation(const bool bRestoreIm
 		return;
 	}
 	ChestAnimationAlpha = bRestoreImmediately ? 1.0f : 0.0f;
-	if (UStaticMeshComponent* ChestComponent = ChestArt->GetStaticMeshComponent())
+	if (UStaticMeshComponent* ChestComponent = ChestArt->GetChestMesh())
 	{
 		ChestComponent->SetMobility(EComponentMobility::Movable);
 	}
-	if (!KeyPresentation)
+	// If the key was already collected (e.g. loading a save from after this point), there's
+	// nothing left to reveal - the chest just shows as opened and empty.
+	if (!KeyPresentation && PlayerState && !PlayerState->HasPhase4GateKey())
 	{
 		if (UStaticMesh* KeyMesh = LoadObject<UStaticMesh>(nullptr, SOTMPhase4Private::KeyMeshPath))
 		{
@@ -426,6 +467,23 @@ void USOTMDemoPhase4WorldSubsystem::BeginChestPresentation(const bool bRestoreIm
 				KeyComponent->SetStaticMesh(KeyMesh);
 				KeyComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 				KeyPresentation->SetActorScale3D(FVector(2.2f));
+			}
+			// The key mesh itself has no collision (it's purely visual, floating and spinning) -
+			// a separate interaction anchor is what actually lets the player press E to collect it.
+			if (!KeyAnchor)
+			{
+				FActorSpawnParameters AnchorParams;
+				AnchorParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				AnchorParams.ObjectFlags |= RF_Transient;
+				const FVector KeyRestLocation = ChestClosedTransform.GetLocation() + FVector(0, 0, 190.0f);
+				KeyAnchor = GetWorld()->SpawnActor<ASOTMPhase4Interactable>(
+					ASOTMPhase4Interactable::StaticClass(), KeyRestLocation, FRotator::ZeroRotator, AnchorParams);
+				if (KeyAnchor)
+				{
+					KeyAnchor->Configure(ESOTMPhase4InteractableKind::Key, 150.0f);
+					KeyAnchor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleEntered);
+					KeyAnchor->OnPlayerExited.AddUObject(this, &ThisClass::HandleExited);
+				}
 			}
 		}
 	}
@@ -614,6 +672,10 @@ void USOTMDemoPhase4WorldSubsystem::BeginDevelopmentDeathAfterKeyAcceptance()
 	bNearChest = true;
 	RefreshPrompt();
 	InteractWithChest();
+	// Chest-open no longer auto-grants the key - collect it immediately too so this dev route
+	// still ends up in the same state it did before that was split apart.
+	bNearKey = true;
+	InteractWithKey();
 
 	const int32 LivesBeforeCatch = PlayerState->GetCurrentLives();
 	const int32 AvailableBeforeCatch = PlayerState->GetAvailableCoins();
@@ -687,6 +749,9 @@ void USOTMDemoPhase4WorldSubsystem::BeginDevelopmentAcceptanceRoute()
 	World->GetTimerManager().SetTimer(OpenChestTimer, FTimerDelegate::CreateWeakLambda(this, [this]
 	{
 		InteractWithChest();
+		// See BeginDevelopmentDeathAfterKeyAcceptance - collecting is a separate step from opening now.
+		bNearKey = true;
+		InteractWithKey();
 		const bool bPass = PlayerState && PlayerState->IsPhase4ChestOpened() && PlayerState->HasPhase4GateKey() &&
 			Objectives && Objectives->GetActiveChapterOneObjective().ObjectiveId == USOTMObjectiveSubsystem::ReachGateId;
 		UE_LOG(LogSOTMPhase4, Display, TEXT("[Phase4Acceptance] CHEST pass=%d opened=%d key=%d active=%s"),

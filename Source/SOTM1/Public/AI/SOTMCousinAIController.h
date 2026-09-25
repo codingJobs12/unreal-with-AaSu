@@ -61,6 +61,7 @@ private:
 	void EvaluateChase();
 	void ClearTargetAndPatrol();
 	bool IsValidLivingPlayer(const AActor* Actor) const;
+	void TryForceProximityDetection();
 	bool HasCatchLineOfSight(const AActor* Actor) const;
 	float GetTargetDistance() const;
 
@@ -78,6 +79,13 @@ private:
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Perception", meta=(ClampMin="1.0", ClampMax="180.0"))
 	float PeripheralVisionHalfAngle = 85.0f;
+
+	// Sight/FOV perception can whiff (thin foliage occlusion, a bad frame of the sweep,
+	// player crouched right at the Cousin's back) leading to "sometimes it just doesn't
+	// notice me". Inside this radius the Cousin senses the player unconditionally, as a
+	// close-range fallback on top of sight - like hearing/smell would in real life.
+	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Perception", meta=(ClampMin="0.0"))
+	float ProximityForceDetectRadius = 450.0f;
 
 	UPROPERTY(EditAnywhere, Category="SOTM|Cousin|Movement", meta=(ClampMin="50.0"))
 	float PatrolSpeed = 210.0f;

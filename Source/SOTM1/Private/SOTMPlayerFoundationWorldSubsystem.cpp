@@ -6,6 +6,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/Character.h"
@@ -13,7 +14,6 @@
 #include "GameFramework/PlayerController.h"
 #include "Misc/PackageName.h"
 #include "ShowFlags.h"
-#include "SOTMFlashlightFixComponent.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "TimerManager.h"
@@ -125,6 +125,7 @@ void USOTMPlayerFoundationWorldSubsystem::TryBindPlayer()
 
 	NormalizeCH1RenderState(*World, PlayerController, Pawn);
 	NormalizeProductionCamera(Pawn);
+	AttachFlashlightToSocket(Pawn);
 
 	USOTMPlayerVitalComponent* Vitals = Pawn->FindComponentByClass<USOTMPlayerVitalComponent>();
 	if (!Vitals)
@@ -136,19 +137,6 @@ void USOTMPlayerFoundationWorldSubsystem::TryBindPlayer()
 			RF_Transient);
 		Pawn->AddInstanceComponent(Vitals);
 		Vitals->RegisterComponent();
-	}
-
-	// Flashlight source-radius + anti-flicker fix, added the same way as Vitals above -
-	// see USOTMFlashlightFixComponent's class comment for what it does and why.
-	if (!Pawn->FindComponentByClass<USOTMFlashlightFixComponent>())
-	{
-		USOTMFlashlightFixComponent* FlashlightFix = NewObject<USOTMFlashlightFixComponent>(
-			Pawn,
-			USOTMFlashlightFixComponent::StaticClass(),
-			TEXT("SOTM_FlashlightFix"),
-			RF_Transient);
-		Pawn->AddInstanceComponent(FlashlightFix);
-		FlashlightFix->RegisterComponent();
 	}
 
 	if (UGameInstance* GameInstance = World->GetGameInstance())
@@ -332,6 +320,38 @@ void USOTMPlayerFoundationWorldSubsystem::NormalizeProductionCamera(APawn* Pawn)
 	// probe; Pawn/mountain collision and movement collision remain unchanged.
 	CameraBoom->bDoCollisionTest = false;
 	NormalizedPlayerCamera = PlayerCamera;
+}
+
+void USOTMPlayerFoundationWorldSubsystem::AttachFlashlightToSocket(APawn* Pawn)
+{
+	// The player added their own flashlight setup (mesh + light) in the Blueprint. It's
+	// left exactly as they built it; this only re-parents whatever they added under the
+	// "FlashLight" socket on the character's skeletal mesh, so it tracks the hand/socket
+	// correctly instead of wherever the Blueprint's construction script happened to place
+	// it. Matches anything with "flashlight" in its component name, so it doesn't matter
+	// how many pieces (mesh, light, both) they gave it.
+	ACharacter* Character = Cast<ACharacter>(Pawn);
+	USkeletalMeshComponent* Mesh = Character ? Character->GetMesh() : nullptr;
+	if (!Mesh || !Mesh->DoesSocketExist(TEXT("FlashLight")))
+	{
+		return;
+	}
+
+	for (UActorComponent* Component : Pawn->GetComponents())
+	{
+		USceneComponent* SceneComp = Cast<USceneComponent>(Component);
+		if (!SceneComp || SceneComp == Mesh ||
+			!SceneComp->GetName().Contains(TEXT("Flashlight"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+		if (SceneComp->GetAttachParent() == Mesh && SceneComp->GetAttachSocketName() == TEXT("FlashLight"))
+		{
+			continue;
+		}
+		SceneComp->AttachToComponent(
+			Mesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("FlashLight"));
+	}
 }
 
 #if !UE_BUILD_SHIPPING

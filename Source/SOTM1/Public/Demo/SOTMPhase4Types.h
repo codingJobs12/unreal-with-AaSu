@@ -7,7 +7,8 @@ UENUM(BlueprintType)
 enum class ESOTMPhase4InteractableKind : uint8
 {
 	Chest,
-	Gate
+	Gate,
+	Key
 };
 
 UENUM(BlueprintType)

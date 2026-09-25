@@ -15,13 +15,17 @@ public:
 	int32 SpeedBoostUnlockCost = 5; // TEMP: testing cost, was 250
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Level 1", meta=(ClampMin="1.0", ClampMax="2.0"))
-	float SpeedBoostMultiplier = 1.40f;
+	float SpeedBoostMultiplier = 2.0f; // 2x normal walk speed while Speed Boost (Q) is active
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Level 1", meta=(ClampMin="0.1", ClampMax="30.0"))
 	float SpeedBoostDuration = 3.0f;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Level 1", meta=(ClampMin="0.1", ClampMax="60.0"))
 	float SpeedBoostCooldown = 10.0f;
+
+	/** Blocks the Shift test sprint (IA_Sprint) in the forest so only Speed Boost (Q) changes speed. */
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Testing")
+	bool bDisableShiftTestSprint = true;
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Station", meta=(ClampMin="100.0", ClampMax="1500.0"))
 	float StationInteractionRadius = 475.0f;

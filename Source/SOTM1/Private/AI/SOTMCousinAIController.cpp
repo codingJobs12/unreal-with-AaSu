@@ -8,6 +8,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -108,6 +109,8 @@ void ASOTMCousinAIController::EvaluateBehavior()
 	{
 		return;
 	}
+
+	TryForceProximityDetection();
 
 	if (AActor* Target = CurrentTarget.Get(); Target && IsValidLivingPlayer(Target))
 	{
@@ -328,6 +331,41 @@ void ASOTMCousinAIController::AggravateTowards(AActor* PlayerActor)
 	LastKnownTargetLocation = PlayerActor->GetActorLocation();
 	LastSeenTargetTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	SetState(ESOTMCousinAIState::Chase, TEXT("sibling stunned"));
+}
+
+void ASOTMCousinAIController::TryForceProximityDetection()
+{
+	if (CurrentTarget.IsValid() || ProximityForceDetectRadius <= 0.0f)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	APawn* PlayerPawn = World ? UGameplayStatics::GetPlayerPawn(World, 0) : nullptr;
+	if (!GetPawn() || !PlayerPawn || !IsValidLivingPlayer(PlayerPawn))
+	{
+		return;
+	}
+	if (FVector::DistSquared(GetPawn()->GetActorLocation(), PlayerPawn->GetActorLocation())
+		> FMath::Square(ProximityForceDetectRadius))
+	{
+		return;
+	}
+
+	// Close enough that the Cousin "senses" the player even though sight/FOV missed them.
+	const bool bNewEncounter = CurrentTarget.Get() != PlayerPawn || !bCanSeeTarget;
+	CurrentTarget = PlayerPawn;
+	bCanSeeTarget = true;
+	LastKnownTargetLocation = PlayerPawn->GetActorLocation();
+	LastSeenTargetTime = World->GetTimeSeconds();
+	SetState(ESOTMCousinAIState::Chase, TEXT("proximity sensed"));
+	if (bNewEncounter)
+	{
+		if (USOTMDemoPhase2WorldSubsystem* Phase2 = World->GetSubsystem<USOTMDemoPhase2WorldSubsystem>())
+		{
+			Phase2->NotifyCousinDetected(this);
+		}
+		AlertPack(PlayerPawn);
+	}
 }
 
 bool ASOTMCousinAIController::IsValidLivingPlayer(const AActor* Actor) const

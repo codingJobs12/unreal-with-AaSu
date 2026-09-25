@@ -76,6 +76,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="SOTM|Objective|Phase 4")
 	ESOTMPhase4ActionResult TryOpenPhase4Chest();
+	ESOTMPhase4ActionResult TryCollectPhase4GateKey();
 
 	UFUNCTION(BlueprintCallable, Category="SOTM|Objective|Phase 4")
 	ESOTMPhase4ActionResult TryUnlockPhase4Gate();

@@ -139,7 +139,7 @@ ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryOpenPhase4Chest()
 	{
 		return ESOTMPhase4ActionResult::InvalidState;
 	}
-	if (PlayerState->IsPhase4ChestOpened() || PlayerState->HasPhase4GateKey())
+	if (PlayerState->IsPhase4ChestOpened())
 	{
 		return ESOTMPhase4ActionResult::AlreadyCompleted;
 	}
@@ -156,7 +156,29 @@ ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryOpenPhase4Chest()
 	{
 		return ESOTMPhase4ActionResult::MissingLightningThrow;
 	}
-	return PlayerState->CommitPhase4ChestOpenedAndKey()
+	// Opening the chest only reveals the key now - the player still has to walk up to it and
+	// press E to actually collect it (see TryCollectPhase4GateKey).
+	return PlayerState->CommitPhase4ChestOpened()
+		? ESOTMPhase4ActionResult::Success
+		: ESOTMPhase4ActionResult::SaveFailed;
+}
+
+ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryCollectPhase4GateKey()
+{
+	if (!PlayerState)
+	{
+		return ESOTMPhase4ActionResult::InvalidState;
+	}
+	if (PlayerState->HasPhase4GateKey())
+	{
+		return ESOTMPhase4ActionResult::AlreadyCompleted;
+	}
+	// The key can't be collected before the chest that reveals it has been opened.
+	if (!PlayerState->IsPhase4ChestOpened())
+	{
+		return ESOTMPhase4ActionResult::PreviousObjectivesIncomplete;
+	}
+	return PlayerState->CommitPhase4GateKey()
 		? ESOTMPhase4ActionResult::Success
 		: ESOTMPhase4ActionResult::SaveFailed;
 }

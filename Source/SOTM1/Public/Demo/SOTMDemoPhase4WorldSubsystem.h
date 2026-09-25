@@ -6,6 +6,7 @@
 #include "SOTMDemoPhase4WorldSubsystem.generated.h"
 
 class AStaticMeshActor;
+class ASOTMChestActor;
 class ASOTMPhase4Interactable;
 class UEnhancedInputComponent;
 class UInputAction;
@@ -53,6 +54,7 @@ private:
 	void RefreshPrompt();
 	void InteractWithChest();
 	void InteractWithGate();
+	void InteractWithKey();
 	void BeginChestPresentation(bool bRestoreImmediately);
 	void UpdateChestPresentation();
 	void BeginGatePresentation(bool bRestoreImmediately);
@@ -75,7 +77,7 @@ private:
 	TObjectPtr<USOTMObjectiveSubsystem> Objectives;
 
 	UPROPERTY(Transient)
-	TObjectPtr<AStaticMeshActor> ChestArt;
+	TObjectPtr<ASOTMChestActor> ChestArt;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AStaticMeshActor> GateArt;
@@ -90,6 +92,9 @@ private:
 	TObjectPtr<ASOTMPhase4Interactable> GateAnchor;
 
 	UPROPERTY(Transient)
+	TObjectPtr<ASOTMPhase4Interactable> KeyAnchor;
+
+	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoCompleteWidget> DemoCompleteWidget;
 
 	UPROPERTY(Transient)
@@ -99,6 +104,7 @@ private:
 	uint32 InteractBindingHandle = 0;
 	bool bNearChest = false;
 	bool bNearGate = false;
+	bool bNearKey = false;
 	bool bGateAnimationRunning = false;
 	bool bDemoInputLockHeld = false;
 	float ChestAnimationAlpha = 0.0f;

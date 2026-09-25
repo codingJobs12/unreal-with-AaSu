@@ -128,7 +128,8 @@ public:
 	bool IsPhase4DemoCompleted() const { return bPhase4DemoCompleted; }
 
 	/** Persistent, atomic Phase 4 transactions. Validation remains in the Objective System. */
-	bool CommitPhase4ChestOpenedAndKey();
+	bool CommitPhase4ChestOpened();
+	bool CommitPhase4GateKey();
 	bool CommitPhase4GateUnlocked();
 	bool CommitPhase4DemoCompleted();
 

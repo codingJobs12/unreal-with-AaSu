@@ -23,6 +23,9 @@ namespace SOTMLightningPrivate
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* ThrowSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_UpgradeSuccess.SFX_TEMP_UpgradeSuccess");
 	const TCHAR* DeniedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Denied.SFX_TEMP_Denied");
+	// Self-contained VFX prefab from the Speedster asset pack: plays P_Sphere_of_Lightning
+	// (plus a burst effect and sound) and cleans itself up after its own Duration.
+	const TCHAR* LightningBurstActorPath = TEXT("/Game/SuperPowers/Powers/Speedster/Rays/BP_LightningBurst.BP_LightningBurst_C");
 
 	FName NormalizeMapPackageName(const UWorld* World)
 	{
@@ -231,38 +234,27 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 	}
 
 	const USOTMLightningThrowSettings* Settings = GetDefault<USOTMLightningThrowSettings>();
-	FVector ViewLocation = Pawn->GetActorLocation();
-	FRotator ViewRotation = Pawn->GetActorRotation();
-	if (PC)
-	{
-		PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	}
-	const FVector ThrowDirection = ViewRotation.Vector();
+	const FVector PlayerLocation = Pawn->GetActorLocation();
 
-	// The bolt travels until it meets world geometry; Cousins are caught by proximity to
-	// that impact point so a throw does not need pixel-accurate aim at a moving target.
-	const FVector TraceEnd = ViewLocation + ThrowDirection * Settings->LightningThrowRange;
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SOTMLightningThrow), false, Pawn);
-	FHitResult Hit;
-	const bool bHitWorld = World->LineTraceSingleByChannel(
-		Hit, ViewLocation, TraceEnd, ECC_Visibility, TraceParams);
-	const FVector ImpactPoint = bHitWorld ? Hit.ImpactPoint : TraceEnd;
-
+	// No aiming required: any Cousin within spotting range is a valid target, in any
+	// direction around the player (not just in front, not just on-screen). With several
+	// in range, only the nearest one is stunned - never more than one per throw.
 	ASOTMCousinCharacter* StunnedCousin = nullptr;
-	float NearestStunDistanceSq = TNumericLimits<float>::Max();
+	float NearestDistance = TNumericLimits<float>::Max();
 	for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
 	{
-		const float DistanceSq = FVector::DistSquared(It->GetActorLocation(), ImpactPoint);
-		if (DistanceSq > FMath::Square(Settings->LightningThrowHitRadius))
+		const float Distance = FVector::Dist(It->GetActorLocation(), PlayerLocation);
+		if (Distance > Settings->LightningThrowRange)
 		{
 			continue;
 		}
-		if (DistanceSq < NearestStunDistanceSq)
+		if (Distance < NearestDistance)
 		{
-			NearestStunDistanceSq = DistanceSq;
+			NearestDistance = Distance;
 			StunnedCousin = *It;
 		}
 	}
+	const FVector ImpactPoint = StunnedCousin ? StunnedCousin->GetActorLocation() : PlayerLocation;
 
 	int32 StunnedCount = 0;
 	if (StunnedCousin)
@@ -272,6 +264,20 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 			if (Controller->ApplyLightningStun(Settings->StunDuration))
 			{
 				++StunnedCount;
+
+				// Play the stun VFX on the cousin, exactly where they were hit.
+				if (UClass* BurstClass = LoadClass<AActor>(nullptr, SOTMLightningPrivate::LightningBurstActorPath))
+				{
+					FActorSpawnParameters SpawnParams;
+					SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+					if (AActor* Burst = World->SpawnActor<AActor>(
+						BurstClass, StunnedCousin->GetActorLocation(), FRotator::ZeroRotator, SpawnParams))
+					{
+						// Belt-and-suspenders: the prefab is expected to clean itself up via its
+						// own Duration, but this guarantees it never outlives the stun regardless.
+						Burst->SetLifeSpan(FMath::Max(0.5f, Settings->StunDuration));
+					}
+				}
 				// "Stunning one cousin makes the others angry" - every sibling in range hunts the player.
 				const FVector StunLocation = StunnedCousin->GetActorLocation();
 				for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
@@ -310,7 +316,27 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 		CooldownTickTimer, this, &ThisClass::TickCooldown, 0.1f, true);
 	SetRuntimeState(ESOTMLightningThrowRuntimeState::Cooldown);
 
-	UE_LOG(LogSOTMLightning, Display,
-		TEXT("Lightning Throw used: impact=%s stunned=%d"), *ImpactPoint.ToString(), StunnedCount);
+	if (StunnedCount == 0)
+	{
+		// No Cousin was within spotting range at all - log the closest one anyway so a
+		// bad case (out of range) can be told apart from an actual bug at a glance.
+		float NearestAnyDistance = -1.0f;
+		for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
+		{
+			const float Distance = FVector::Dist(It->GetActorLocation(), PlayerLocation);
+			if (NearestAnyDistance < 0.0f || Distance < NearestAnyDistance)
+			{
+				NearestAnyDistance = Distance;
+			}
+		}
+		UE_LOG(LogSOTMLightning, Display,
+			TEXT("Lightning Throw used: stunned=0 nearestCousinDistance=%.0f (range=%.0f)"),
+			NearestAnyDistance, Settings->LightningThrowRange);
+	}
+	else
+	{
+		UE_LOG(LogSOTMLightning, Display,
+			TEXT("Lightning Throw used: impact=%s stunned=%d"), *ImpactPoint.ToString(), StunnedCount);
+	}
 	return StunnedCount;
 }
