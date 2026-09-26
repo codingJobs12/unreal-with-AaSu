@@ -29,4 +29,12 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Station", meta=(ClampMin="100.0", ClampMax="1500.0"))
 	float StationInteractionRadius = 475.0f;
+
+	// Widget class USOTMDemoPhase3WorldSubsystem::OpenSkillTreeUI spawns for the T-key
+	// skill tree screen. Point this at WBP_SkillTree (or any other
+	// USOTMSkillTreeWidget subclass) to use that Designer-built layout instead of the
+	// plain native class; left unset, OpenSkillTreeUI falls back to
+	// USOTMSkillTreeWidget::StaticClass() itself.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="UI")
+	TSubclassOf<class USOTMSkillTreeWidget> SkillTreeWidgetClass;
 };

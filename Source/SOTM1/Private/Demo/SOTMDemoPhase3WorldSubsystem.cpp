@@ -27,6 +27,7 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UI/SOTMUpgradeStationWidget.h"
+#include "UI/SOTMSkillTreeWidget.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -89,6 +90,7 @@ void USOTMDemoPhase3WorldSubsystem::Deinitialize()
 		ActiveBoostAudio = nullptr;
 	}
 	CloseUpgradeUI();
+	CloseSkillTreeUI();
 	RestoreMovementSpeed();
 	UnbindProductionInput();
 	if (PlayerState)
@@ -454,8 +456,11 @@ void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
 
 	SpeedBoostInputAction = NewObject<UInputAction>(this, TEXT("IA_SOTM_SpeedBoost"));
 	SpeedBoostInputAction->ValueType = EInputActionValueType::Boolean;
+	SkillTreeInputAction = NewObject<UInputAction>(this, TEXT("IA_SOTM_SkillTree"));
+	SkillTreeInputAction->ValueType = EInputActionValueType::Boolean;
 	Phase3InputContext = NewObject<UInputMappingContext>(this, TEXT("IMC_SOTM_Phase3"));
 	Phase3InputContext->MapKey(SpeedBoostInputAction, EKeys::Q);
+	Phase3InputContext->MapKey(SkillTreeInputAction, EKeys::T);
 	InputSubsystem->AddMappingContext(Phase3InputContext, 50);
 	if (GetDefault<USOTMPhase3Settings>()->bDisableShiftTestSprint)
 	{
@@ -464,6 +469,9 @@ void USOTMDemoPhase3WorldSubsystem::BindProductionInput()
 	FEnhancedInputActionEventBinding& BoostBinding = EnhancedInput->BindAction(
 		SpeedBoostInputAction, ETriggerEvent::Started, this, &ThisClass::HandleSpeedBoostInput);
 	SpeedBoostBindingHandle = BoostBinding.GetHandle();
+	FEnhancedInputActionEventBinding& SkillTreeBinding = EnhancedInput->BindAction(
+		SkillTreeInputAction, ETriggerEvent::Started, this, &ThisClass::HandleSkillTreeInput);
+	SkillTreeBindingHandle = SkillTreeBinding.GetHandle();
 	BoundEnhancedInput = EnhancedInput;
 }
 
@@ -565,6 +573,21 @@ void USOTMDemoPhase3WorldSubsystem::HandleSpeedBoostInput()
 	TryActivateSpeedBoost();
 }
 
+void USOTMDemoPhase3WorldSubsystem::HandleSkillTreeInput()
+{
+	UE_LOG(LogSOTMPhase3, Display, TEXT("T pressed: SkillTreeOpen=%d PlayerState=%s Dead=%d GameOver=%d"),
+		IsSkillTreeUIOpen(), *GetNameSafe(PlayerState),
+		PlayerState ? PlayerState->IsPlayerDead() : -1, PlayerState ? PlayerState->IsGameOver() : -1);
+	if (IsSkillTreeUIOpen())
+	{
+		CloseSkillTreeUI();
+	}
+	else
+	{
+		OpenSkillTreeUI();
+	}
+}
+
 // StationActor->OnPlayerEntered -> here. ASOTMTimmyUpgradeStation already filters for
 // the player (BP_MenuSystemCharacter0) before broadcasting, so this is just: overlap
 // started -> show the prompt panel. Nothing else.
@@ -655,6 +678,67 @@ void USOTMDemoPhase3WorldSubsystem::CloseUpgradeUI()
 	}
 }
 
+void USOTMDemoPhase3WorldSubsystem::OpenSkillTreeUI()
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	if (SkillTreeWidget || !PC || !PlayerState || PlayerState->IsPlayerDead() || PlayerState->IsGameOver())
+	{
+		UE_LOG(LogSOTMPhase3, Warning,
+			TEXT("OpenSkillTreeUI blocked: WidgetAlreadyOpen=%d PC=%s PlayerState=%s"),
+			SkillTreeWidget != nullptr, *GetNameSafe(PC), *GetNameSafe(PlayerState));
+		return;
+	}
+
+	TSubclassOf<USOTMSkillTreeWidget> SkillTreeWidgetClass = GetDefault<USOTMPhase3Settings>()->SkillTreeWidgetClass;
+	if (!SkillTreeWidgetClass)
+	{
+		SkillTreeWidgetClass = USOTMSkillTreeWidget::StaticClass();
+	}
+	SkillTreeWidget = CreateWidget<USOTMSkillTreeWidget>(PC, SkillTreeWidgetClass);
+	if (!SkillTreeWidget)
+	{
+		UE_LOG(LogSOTMPhase3, Error, TEXT("OpenSkillTreeUI: CreateWidget<USOTMSkillTreeWidget> failed."));
+		return;
+	}
+	SkillTreeWidget->AddToViewport(50000);
+	bPreviousMouseCursorSkillTree = PC->bShowMouseCursor;
+	PC->bShowMouseCursor = true;
+	// UIOnly (not GameAndUI): the skill tree is a full modal screen, and GameAndUI lets
+	// gameplay input (e.g. mouse-wheel weapon switching) fire at the same time as the UI,
+	// which was leaking scroll input from this panel straight into weapon cycling.
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(SkillTreeWidget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PC->SetInputMode(InputMode);
+	PlayerState->AcquireInputLock(ESOTMInputLockReason::Custom);
+	bSkillTreeInputLockHeld = true;
+	UE_LOG(LogSOTMPhase3, Display, TEXT("Skill tree UI opened."));
+}
+
+void USOTMDemoPhase3WorldSubsystem::CloseSkillTreeUI()
+{
+	if (SkillTreeWidget)
+	{
+		SkillTreeWidget->RemoveFromParent();
+		SkillTreeWidget = nullptr;
+	}
+	if (PlayerState && bSkillTreeInputLockHeld)
+	{
+		PlayerState->ReleaseInputLock(ESOTMInputLockReason::Custom);
+	}
+	bSkillTreeInputLockHeld = false;
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PC->bShowMouseCursor = bPreviousMouseCursorSkillTree;
+			FInputModeGameOnly InputMode;
+			PC->SetInputMode(InputMode);
+		}
+	}
+}
+
 ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoost()
 {
 	if (!PlayerState)
@@ -732,23 +816,26 @@ bool USOTMDemoPhase3WorldSubsystem::TryActivateSpeedBoost()
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
 	USOTMSpeedBoostComponent* Boost = USOTMSpeedBoostComponent::FindOrAddTo(PC ? PC->GetPawn() : nullptr);
 	const USOTMPhase3Settings* Settings = GetDefault<USOTMPhase3Settings>();
+	// Duration is the skill tree's effective value (base + any Level 2/3 upgrades bought),
+	// not the raw settings default - this is what actually makes buying the upgrade matter.
+	const float Duration = PlayerState->GetEffectiveSpeedBoostDuration();
 	if (!World || !Boost || !Boost->StartBoost(Settings->SpeedBoostMultiplier))
 	{
 		return false;
 	}
 	ActiveBoostComponent = Boost;
 	World->GetTimerManager().SetTimer(ActiveTimer, this, &ThisClass::FinishActiveSpeedBoost,
-		Settings->SpeedBoostDuration, false);
+		Duration, false);
 	World->GetTimerManager().SetTimer(PresentationTimer, this, &ThisClass::UpdateRuntimePresentation,
 		0.1f, true);
-	SetRuntimeState(ESOTMSpeedBoostRuntimeState::Active, Settings->SpeedBoostDuration);
+	SetRuntimeState(ESOTMSpeedBoostRuntimeState::Active, Duration);
 	if (USoundBase* Sound = LoadObject<USoundBase>(nullptr, SOTMPhase3Private::BoostSound))
 	{
 		ActiveBoostAudio = UGameplayStatics::SpawnSound2D(
 			this, Sound, 0.34f, 1.0f, 0.0f, nullptr, false, false);
 	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost ACTIVE multiplier=%.2f duration=%.1f"),
-		Settings->SpeedBoostMultiplier, Settings->SpeedBoostDuration);
+		Settings->SpeedBoostMultiplier, Duration);
 	return true;
 }
 
@@ -765,7 +852,9 @@ void USOTMDemoPhase3WorldSubsystem::FinishActiveSpeedBoost()
 		ActiveBoostAudio->FadeOut(0.18f, 0.0f);
 		ActiveBoostAudio = nullptr;
 	}
-	const float Cooldown = GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
+	const float Cooldown = PlayerState
+		? PlayerState->GetEffectiveSpeedBoostCooldown()
+		: GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
 	World->GetTimerManager().SetTimer(CooldownTimer, this, &ThisClass::FinishCooldown, Cooldown, false);
 	SetRuntimeState(ESOTMSpeedBoostRuntimeState::Cooldown, Cooldown);
 }
@@ -810,11 +899,11 @@ void USOTMDemoPhase3WorldSubsystem::SetRuntimeState(
 	float Total = 0.0f;
 	if (NewState == ESOTMSpeedBoostRuntimeState::Active)
 	{
-		Total = GetDefault<USOTMPhase3Settings>()->SpeedBoostDuration;
+		Total = PlayerState ? PlayerState->GetEffectiveSpeedBoostDuration() : GetDefault<USOTMPhase3Settings>()->SpeedBoostDuration;
 	}
 	else if (NewState == ESOTMSpeedBoostRuntimeState::Cooldown)
 	{
-		Total = GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
+		Total = PlayerState ? PlayerState->GetEffectiveSpeedBoostCooldown() : GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
 	}
 	const float Normalized = Total > 0.0f ? FMath::Clamp(RemainingSeconds / Total, 0.0f, 1.0f) : 0.0f;
 	OnSpeedBoostStateChanged.Broadcast(NewState, RemainingSeconds, Normalized);

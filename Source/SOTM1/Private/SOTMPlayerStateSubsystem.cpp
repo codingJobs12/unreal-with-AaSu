@@ -5,10 +5,14 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SaveGame.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "HAL/FileManager.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Ability/SOTMLightningThrowSettings.h"
+#include "Ability/SOTMPhase3Settings.h"
+#include "Ability/SOTMSkillTreeSettings.h"
 #include "SOTMGameOverWidget.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "TimerManager.h"
@@ -30,6 +34,7 @@ namespace SOTMPlayerStatePrivate
 	const FString SpeedBoostRecordPrefix(TEXT("SOTM_SPEEDBOOST|"));
 	const FString Phase4RecordPrefix(TEXT("SOTM_PHASE4|"));
 	const FString LightningThrowRecordPrefix(TEXT("SOTM_LIGHTNING|"));
+	const FString SkillTreeRecordPrefix(TEXT("SOTM_SKILLTREE|"));
 
 	bool GetBoolProperty(const UObject* Object, const FName Name, bool& OutValue)
 	{
@@ -188,10 +193,22 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	MaximumLives = FMath::Max(1, Settings->MaximumLives);
 	CurrentLives = FMath::Clamp(Settings->StartingLives, 1, MaximumLives);
 	PersistentHealth = FMath::Max(1.0f, Settings->MaximumHealth);
+
+	GrantAbilityPointsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("SOTM.GrantAbilityPoints"),
+		TEXT("Grants (or, with a negative amount, removes) Ability Points and immediately saves them, e.g. 'SOTM.GrantAbilityPoints 50'."),
+		FConsoleCommandWithArgsDelegate::CreateUObject(
+			this, &USOTMPlayerStateSubsystem::HandleGrantAbilityPointsCommand));
 }
 
 void USOTMPlayerStateSubsystem::Deinitialize()
 {
+	if (GrantAbilityPointsConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GrantAbilityPointsConsoleCommand);
+		GrantAbilityPointsConsoleCommand = nullptr;
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RespawnTimerHandle);
@@ -484,6 +501,124 @@ bool USOTMPlayerStateSubsystem::CommitPhase4DemoCompleted()
 	OnPhase4ProgressChanged.Broadcast(
 		bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
 	return true;
+}
+
+bool USOTMPlayerStateSubsystem::TryUnlockSkillUpgrade(
+	const FName AbilityId, const int32 TargetLevel, const int32 AbilityPointCost)
+{
+	if (TargetLevel < 2)
+	{
+		return false;
+	}
+	const int32 CurrentUpgradeLevel = SkillUpgradeLevels.FindRef(AbilityId);
+	const int32 RequiredPreviousUpgradeLevel = TargetLevel - 2;
+	if (CurrentUpgradeLevel != RequiredPreviousUpgradeLevel)
+	{
+		// Either already bought (or beyond), or trying to skip a level.
+		return false;
+	}
+	if (AbilityPoints < AbilityPointCost)
+	{
+		return false;
+	}
+	const int32 PreviousAbilityPoints = AbilityPoints;
+	const int32 PreviousUpgradeLevel = CurrentUpgradeLevel;
+	AbilityPoints -= AbilityPointCost;
+	SkillUpgradeLevels.Add(AbilityId, TargetLevel - 1);
+
+	// Persist the complete transaction before confirming it, matching every other
+	// ability purchase. If the production slot cannot save, roll back so a failed
+	// click never leaves points spent without the upgrade (or vice versa).
+	if (!SavePlayerStateInternal(TEXT("SkillTreeUpgrade")))
+	{
+		AbilityPoints = PreviousAbilityPoints;
+		SkillUpgradeLevels.Add(AbilityId, PreviousUpgradeLevel);
+		return false;
+	}
+	return true;
+}
+
+void USOTMPlayerStateSubsystem::GrantAbilityPointsForTesting(const int32 Amount)
+{
+	const int32 PreviousAbilityPoints = AbilityPoints;
+	AbilityPoints = FMath::Max(0, AbilityPoints + Amount);
+	if (!SavePlayerStateInternal(TEXT("GrantAbilityPointsForTesting")))
+	{
+		AbilityPoints = PreviousAbilityPoints;
+		UE_LOG(LogTemp, Warning, TEXT("SOTM.GrantAbilityPoints: save failed, points not granted."));
+	}
+}
+
+void USOTMPlayerStateSubsystem::HandleGrantAbilityPointsCommand(const TArray<FString>& Args)
+{
+	if (Args.Num() < 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Usage: SOTM.GrantAbilityPoints <amount>"));
+		return;
+	}
+	const int32 Amount = FCString::Atoi(*Args[0]);
+	GrantAbilityPointsForTesting(Amount);
+	UE_LOG(LogTemp, Display, TEXT("SOTM.GrantAbilityPoints: granted %d, now have %d (saved)."), Amount, AbilityPoints);
+}
+
+float USOTMPlayerStateSubsystem::GetEffectiveSpeedBoostDuration() const
+{
+	float Value = GetDefault<USOTMPhase3Settings>()->SpeedBoostDuration;
+	const USOTMSkillTreeSettings* Settings = GetDefault<USOTMSkillTreeSettings>();
+	const int32 UpgradeLevel = GetSkillUpgradeLevel(TEXT("SpeedBoost"));
+	for (int32 Level = 2; Level <= 1 + UpgradeLevel; ++Level)
+	{
+		if (const FSOTMSkillTreeLevelDefinition* LevelDef = Settings ? Settings->FindLevel(TEXT("SpeedBoost"), Level) : nullptr)
+		{
+			Value += LevelDef->DurationDeltaSeconds;
+		}
+	}
+	return Value;
+}
+
+float USOTMPlayerStateSubsystem::GetEffectiveSpeedBoostCooldown() const
+{
+	float Value = GetDefault<USOTMPhase3Settings>()->SpeedBoostCooldown;
+	const USOTMSkillTreeSettings* Settings = GetDefault<USOTMSkillTreeSettings>();
+	const int32 UpgradeLevel = GetSkillUpgradeLevel(TEXT("SpeedBoost"));
+	for (int32 Level = 2; Level <= 1 + UpgradeLevel; ++Level)
+	{
+		if (const FSOTMSkillTreeLevelDefinition* LevelDef = Settings ? Settings->FindLevel(TEXT("SpeedBoost"), Level) : nullptr)
+		{
+			Value += LevelDef->CooldownDeltaSeconds;
+		}
+	}
+	return FMath::Max(0.1f, Value);
+}
+
+float USOTMPlayerStateSubsystem::GetEffectiveLightningThrowCooldown() const
+{
+	float Value = GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown;
+	const USOTMSkillTreeSettings* Settings = GetDefault<USOTMSkillTreeSettings>();
+	const int32 UpgradeLevel = GetSkillUpgradeLevel(TEXT("LightningThrow"));
+	for (int32 Level = 2; Level <= 1 + UpgradeLevel; ++Level)
+	{
+		if (const FSOTMSkillTreeLevelDefinition* LevelDef = Settings ? Settings->FindLevel(TEXT("LightningThrow"), Level) : nullptr)
+		{
+			Value += LevelDef->CooldownDeltaSeconds;
+		}
+	}
+	return FMath::Max(0.1f, Value);
+}
+
+float USOTMPlayerStateSubsystem::GetEffectiveLightningThrowRange() const
+{
+	float Value = GetDefault<USOTMLightningThrowSettings>()->LightningThrowRange;
+	const USOTMSkillTreeSettings* Settings = GetDefault<USOTMSkillTreeSettings>();
+	const int32 UpgradeLevel = GetSkillUpgradeLevel(TEXT("LightningThrow"));
+	for (int32 Level = 2; Level <= 1 + UpgradeLevel; ++Level)
+	{
+		if (const FSOTMSkillTreeLevelDefinition* LevelDef = Settings ? Settings->FindLevel(TEXT("LightningThrow"), Level) : nullptr)
+		{
+			Value += LevelDef->RangeDelta;
+		}
+	}
+	return Value;
 }
 
 bool USOTMPlayerStateSubsystem::IsCoinCollected(const FGuid PersistentCoinId) const
@@ -1359,6 +1494,19 @@ bool USOTMPlayerStateSubsystem::WriteStateToSaveObject(UObject* SaveObject) cons
 	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d"),
 		*SOTMPlayerStatePrivate::LightningThrowRecordPrefix,
 		bLightningThrowUnlocked ? 1 : 0));
+	TArray<FString> SerializedSkillUpgrades;
+	SerializedSkillUpgrades.Reserve(SkillUpgradeLevels.Num());
+	for (const TPair<FName, int32>& Upgrade : SkillUpgradeLevels)
+	{
+		if (Upgrade.Value > 0)
+		{
+			SerializedSkillUpgrades.Add(FString::Printf(TEXT("%s:%d"), *Upgrade.Key.ToString(), Upgrade.Value));
+		}
+	}
+	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d|%s"),
+		*SOTMPlayerStatePrivate::SkillTreeRecordPrefix,
+		AbilityPoints,
+		*FString::Join(SerializedSkillUpgrades, TEXT(","))));
 	const bool bCollectedCoinIdsWritten =
 		SOTMPlayerStatePrivate::SetStringProperty(
 			SaveObject,
@@ -1439,6 +1587,8 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bool bLoadedPhase4HasGateKey = false;
 	bool bLoadedPhase4GateUnlocked = false;
 	bool bLoadedPhase4DemoCompleted = false;
+	int32 LoadedAbilityPoints = 0;
+	TMap<FName, int32> LoadedSkillUpgradeLevels;
 	FString LoadedCoinIds;
 
 	SOTMPlayerStatePrivate::GetIntProperty(SaveObject, SOTMPlayerStatePrivate::CurrentLivesProperty, LoadedLives);
@@ -1508,6 +1658,32 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			}
 			continue;
 		}
+		if (SaveVersion >= 6 && SerializedId.StartsWith(SOTMPlayerStatePrivate::SkillTreeRecordPrefix))
+		{
+			const FString Remainder = SerializedId.RightChop(SOTMPlayerStatePrivate::SkillTreeRecordPrefix.Len());
+			FString PointsPart;
+			FString UpgradesPart;
+			if (Remainder.Split(TEXT("|"), &PointsPart, &UpgradesPart))
+			{
+				LoadedAbilityPoints = FMath::Max(0, FCString::Atoi(*PointsPart));
+				TArray<FString> UpgradeEntries;
+				UpgradesPart.ParseIntoArray(UpgradeEntries, TEXT(","), true);
+				for (const FString& Entry : UpgradeEntries)
+				{
+					FString AbilityIdPart;
+					FString LevelPart;
+					if (Entry.Split(TEXT(":"), &AbilityIdPart, &LevelPart))
+					{
+						const int32 UpgradeLevel = FMath::Max(0, FCString::Atoi(*LevelPart));
+						if (UpgradeLevel > 0)
+						{
+							LoadedSkillUpgradeLevels.Add(FName(*AbilityIdPart), UpgradeLevel);
+						}
+					}
+				}
+			}
+			continue;
+		}
 		if (SaveVersion >= 4 && SerializedId.StartsWith(SOTMPlayerStatePrivate::Phase4RecordPrefix))
 		{
 			TArray<FString> Fields;
@@ -1541,6 +1717,8 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bPhase4HasGateKey = bLoadedPhase4HasGateKey || bPhase4ChestOpened;
 	bPhase4GateUnlocked = bLoadedPhase4GateUnlocked;
 	bPhase4DemoCompleted = bLoadedPhase4DemoCompleted;
+	AbilityPoints = LoadedAbilityPoints;
+	SkillUpgradeLevels = LoadedSkillUpgradeLevels;
 	bCoinStateDirty = false;
 
 	CheckpointState.bIsValid = !LoadedCheckpointId.IsNone() && !LoadedCheckpointMap.IsNone();

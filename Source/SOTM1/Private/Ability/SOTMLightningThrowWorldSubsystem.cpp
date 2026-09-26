@@ -161,8 +161,9 @@ float USOTMLightningThrowWorldSubsystem::GetCooldownRemaining() const
 void USOTMLightningThrowWorldSubsystem::SetRuntimeState(const ESOTMLightningThrowRuntimeState NewState)
 {
 	RuntimeState = NewState;
-	const float Cooldown = FMath::Max(
-		0.1f, GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown);
+	const float Cooldown = PlayerState
+		? PlayerState->GetEffectiveLightningThrowCooldown()
+		: FMath::Max(0.1f, GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown);
 	const float Remaining = GetCooldownRemaining();
 	OnLightningThrowStateChanged.Broadcast(
 		RuntimeState, Remaining, FMath::Clamp(Remaining / Cooldown, 0.0f, 1.0f));
@@ -194,8 +195,9 @@ void USOTMLightningThrowWorldSubsystem::TickCooldown()
 		return;
 	}
 
-	const float Cooldown = FMath::Max(
-		0.1f, GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown);
+	const float Cooldown = PlayerState
+		? PlayerState->GetEffectiveLightningThrowCooldown()
+		: FMath::Max(0.1f, GetDefault<USOTMLightningThrowSettings>()->LightningThrowCooldown);
 	const float Remaining = GetCooldownRemaining();
 	OnLightningThrowStateChanged.Broadcast(
 		RuntimeState, Remaining, FMath::Clamp(Remaining / Cooldown, 0.0f, 1.0f));
@@ -244,7 +246,7 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 	for (TActorIterator<ASOTMCousinCharacter> It(World); It; ++It)
 	{
 		const float Distance = FVector::Dist(It->GetActorLocation(), PlayerLocation);
-		if (Distance > Settings->LightningThrowRange)
+		if (Distance > PlayerState->GetEffectiveLightningThrowRange())
 		{
 			continue;
 		}
@@ -307,7 +309,7 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 
 	World->GetTimerManager().SetTimer(
 		CooldownTimer, this, &ThisClass::FinishCooldown,
-		FMath::Max(0.1f, Settings->LightningThrowCooldown), false);
+		PlayerState->GetEffectiveLightningThrowCooldown(), false);
 	// Starts only here, i.e. only when the player presses F while the ability is
 	// unlocked and Ready (guarded by the early-out above). Repeats every 0.1s so
 	// the HUD progress bar and the 4/3/2/1 countdown update continuously instead
@@ -331,7 +333,7 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 		}
 		UE_LOG(LogSOTMLightning, Display,
 			TEXT("Lightning Throw used: stunned=0 nearestCousinDistance=%.0f (range=%.0f)"),
-			NearestAnyDistance, Settings->LightningThrowRange);
+			NearestAnyDistance, PlayerState->GetEffectiveLightningThrowRange());
 	}
 	else
 	{

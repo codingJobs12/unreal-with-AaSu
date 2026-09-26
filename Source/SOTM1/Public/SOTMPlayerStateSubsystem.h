@@ -8,6 +8,7 @@
 #include "SOTMPlayerStateSubsystem.generated.h"
 
 class APlayerController;
+class IConsoleObject;
 class USOTMGameOverWidget;
 class USOTMPlayerVitalComponent;
 class UUserWidget;
@@ -111,6 +112,47 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Speed Boost")
 	int32 GetSpeedBoostLevel() const { return SpeedBoostLevel; }
+
+	// --- Skill Tree (Ability Points) ------------------------------------------
+	// AbilityPoints and SkillUpgradeLevels are persisted (see WriteStateToSaveObject /
+	// ReadStateFromSaveObject, schema version 6+) and auto-saved via SavePlayerStateInternal
+	// right after every successful TryUnlockSkillUpgrade.
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	int32 GetAbilityPoints() const { return AbilityPoints; }
+
+	// Bought upgrade levels beyond the base unlock: 0 = none, 1 = Level 2 bought,
+	// 2 = Level 3 bought, etc. Unknown AbilityId returns 0.
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	int32 GetSkillUpgradeLevel(FName AbilityId) const { return SkillUpgradeLevels.FindRef(AbilityId); }
+
+	// Dev/console utility - grants (or, with a negative Amount, removes) Ability Points
+	// and immediately persists them (see SavePlayerStateInternal). Also reachable in-game
+	// via the "SOTM.GrantAbilityPoints <amount>" console command.
+	UFUNCTION(BlueprintCallable, Category="SOTM|Skill Tree")
+	void GrantAbilityPointsForTesting(int32 Amount);
+
+	// Atomic: spends AbilityPointCost points to raise AbilityId from TargetLevel-1 to
+	// TargetLevel (TargetLevel must be 2 or higher and exactly one above the current
+	// upgrade level - no skipping levels). Returns false and changes nothing on failure.
+	UFUNCTION(BlueprintCallable, Category="SOTM|Skill Tree")
+	bool TryUnlockSkillUpgrade(FName AbilityId, int32 TargetLevel, int32 AbilityPointCost);
+
+	// Current real gameplay value of each stat, i.e. the ability's base setting plus
+	// every upgrade level bought so far's own delta (see FSOTMSkillTreeLevelDefinition).
+	// This is what actually drives the ability at runtime now - see
+	// USOTMDemoPhase3WorldSubsystem::TryActivateSpeedBoost/FinishActiveSpeedBoost and
+	// USOTMLightningThrowWorldSubsystem::TryThrowLightning.
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	float GetEffectiveSpeedBoostDuration() const;
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	float GetEffectiveSpeedBoostCooldown() const;
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	float GetEffectiveLightningThrowCooldown() const;
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Skill Tree")
+	float GetEffectiveLightningThrowRange() const;
 
 	UFUNCTION(BlueprintPure, Category="SOTM|Ability|Lightning Throw")
 	bool IsLightningThrowUnlocked() const { return bLightningThrowUnlocked; }
@@ -267,7 +309,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMInputLocksChangedSignature OnInputLocksChanged;
 
-	static constexpr int32 CurrentSaveVersion = 5;
+	static constexpr int32 CurrentSaveVersion = 6;
 
 private:
 	UFUNCTION()
@@ -302,6 +344,10 @@ private:
 
 	static FName NormalizeMapPackageName(const UWorld* World);
 
+	// Handler for the "SOTM.GrantAbilityPoints <amount>" console command (registered/
+	// unregistered in Initialize/Deinitialize). Args[0] is parsed as the integer amount.
+	void HandleGrantAbilityPointsCommand(const TArray<FString>& Args);
+
 	UPROPERTY(Transient)
 	int32 CurrentLives = 5;
 
@@ -317,6 +363,8 @@ private:
 	UPROPERTY(Transient)
 	int32 LifetimeCoinsCollected = 0;
 
+	IConsoleObject* GrantAbilityPointsConsoleCommand = nullptr;
+
 	UPROPERTY(Transient)
 	bool bSpeedBoostUnlocked = false;
 
@@ -324,6 +372,12 @@ private:
 
 	UPROPERTY(Transient)
 	int32 SpeedBoostLevel = 0;
+
+	UPROPERTY(Transient)
+	int32 AbilityPoints = 0;
+
+	UPROPERTY(Transient)
+	TMap<FName, int32> SkillUpgradeLevels;
 
 	UPROPERTY(Transient)
 	bool bPhase4ChestOpened = false;
