@@ -69,6 +69,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
 	bool, bHasGateKey,
 	bool, bGateUnlocked,
 	bool, bDemoCompleted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FSOTMIsabelGateProgressChangedSignature,
+	bool, bReached,
+	bool, bHasKey,
+	bool, bUnlocked);
 
 /**
  * Persistent single-player Chapter state. Lives/checkpoints survive map travel
@@ -174,6 +179,21 @@ public:
 	bool CommitPhase4GateKey();
 	bool CommitPhase4GateUnlocked();
 	bool CommitPhase4DemoCompleted();
+
+	/** Standalone Mansion Gate (leads to the Isabel encounter) - separate from Phase 4. */
+	UFUNCTION(BlueprintPure, Category="SOTM|Gate|Isabel")
+	bool IsIsabelGateReached() const { return bIsabelGateReached; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Gate|Isabel")
+	bool HasIsabelGateKey() const { return bHasIsabelGateKey; }
+
+	UFUNCTION(BlueprintPure, Category="SOTM|Gate|Isabel")
+	bool IsIsabelGateUnlocked() const { return bIsabelGateUnlocked; }
+
+	/** Persistent, atomic Isabel Gate transactions. Validation remains in the Objective System. */
+	bool CommitIsabelGateReached();
+	bool CommitIsabelGateKey();
+	bool CommitIsabelGateUnlocked();
 
 	/** Atomic Phase 3 purchase. Lifetime collection is never reduced. */
 	UFUNCTION(BlueprintCallable, Category="SOTM|Ability|Speed Boost")
@@ -294,6 +314,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Demo|Phase 4|Events")
 	FSOTMPhase4ProgressChangedSignature OnPhase4ProgressChanged;
 
+	UPROPERTY(BlueprintAssignable, Category="SOTM|Gate|Isabel|Events")
+	FSOTMIsabelGateProgressChangedSignature OnIsabelGateProgressChanged;
+
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMPlayerActorSignature OnPlayerDeathStarted;
 
@@ -309,7 +332,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Player|Events")
 	FSOTMInputLocksChangedSignature OnInputLocksChanged;
 
-	static constexpr int32 CurrentSaveVersion = 6;
+	static constexpr int32 CurrentSaveVersion = 7;
 
 private:
 	UFUNCTION()
@@ -348,6 +371,12 @@ private:
 	// unregistered in Initialize/Deinitialize). Args[0] is parsed as the integer amount.
 	void HandleGrantAbilityPointsCommand(const TArray<FString>& Args);
 
+	// Handler for the "SOTM.GiveIsabelGateKey" testing console command (registered/
+	// unregistered in Initialize/Deinitialize) - grants the Mansion Gate key without
+	// requiring an in-world key pickup, since none exists yet.
+	void HandleGiveIsabelGateKeyCommand(const TArray<FString>& Args);
+	void HandleResetIsabelGateCommand(const TArray<FString>& Args);
+
 	UPROPERTY(Transient)
 	int32 CurrentLives = 5;
 
@@ -364,6 +393,8 @@ private:
 	int32 LifetimeCoinsCollected = 0;
 
 	IConsoleObject* GrantAbilityPointsConsoleCommand = nullptr;
+	IConsoleObject* GiveIsabelGateKeyConsoleCommand = nullptr;
+	IConsoleObject* ResetIsabelGateConsoleCommand = nullptr;
 
 	UPROPERTY(Transient)
 	bool bSpeedBoostUnlocked = false;
@@ -390,6 +421,15 @@ private:
 
 	UPROPERTY(Transient)
 	bool bPhase4DemoCompleted = false;
+
+	UPROPERTY(Transient)
+	bool bIsabelGateReached = false;
+
+	UPROPERTY(Transient)
+	bool bHasIsabelGateKey = false;
+
+	UPROPERTY(Transient)
+	bool bIsabelGateUnlocked = false;
 
 	/** Stable identities of placed Coins already collected in this Chapter run. */
 	TSet<FGuid> CollectedCoinIds;

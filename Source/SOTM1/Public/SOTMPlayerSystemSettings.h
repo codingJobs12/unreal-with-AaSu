@@ -53,6 +53,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Game Over")
 	ESOTMGameOverRetryPolicy RetryPolicy = ESOTMGameOverRetryPolicy::RestoreAllLivesAtCheckpoint;
 
+	// UI is built in the Designer (e.g. WBP_GameOver, a Blueprint subclass of
+	// USOTMGameOverWidget - see that class's BindWidgetOptional RetryButton/
+	// MainMenuButton) instead of a plain native class - same pattern as
+	// USOTMPhase3Settings::SkillTreeWidgetClass. Left unset, ShowGameOverWidget falls
+	// back to USOTMGameOverWidget::StaticClass() itself.
+	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Game Over")
+	TSubclassOf<class USOTMGameOverWidget> GameOverWidgetClass;
+
 	UPROPERTY(Config, EditAnywhere, BlueprintReadOnly, Category="Save")
 	bool bAutoSaveOnCheckpoint = true;
 

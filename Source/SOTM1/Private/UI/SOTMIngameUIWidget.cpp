@@ -21,6 +21,8 @@
 #include "Ability/SOTMLightningThrowSettings.h"
 #include "Ability/SOTMPhase3Settings.h"
 #include "Demo/SOTMDemoPhase4WorldSubsystem.h"
+#include "Gate/SOTMKeyGateActor.h"
+#include "Kismet/GameplayStatics.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "SOTMPlayerBlueprintLibrary.h"
@@ -261,6 +263,15 @@ void USOTMIngameUIWidget::NativeConstruct()
 		BoundPhase4World->OnNotification.AddDynamic(this, &ThisClass::HandlePhase4Notification);
 	}
 
+	BoundGateActor = GetWorld()
+		? Cast<ASOTMKeyGateActor>(UGameplayStatics::GetActorOfClass(GetWorld(), ASOTMKeyGateActor::StaticClass()))
+		: nullptr;
+	if (BoundGateActor)
+	{
+		BoundGateActor->OnGatePromptChanged.RemoveDynamic(this, &ThisClass::HandleGatePromptChanged);
+		BoundGateActor->OnGatePromptChanged.AddDynamic(this, &ThisClass::HandleGatePromptChanged);
+	}
+
 #if !UE_BUILD_SHIPPING
 	ActiveDevelopmentHUD = this;
 	if (bPendingObjectivePreview)
@@ -330,11 +341,16 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPhase4World->OnPromptChanged.RemoveDynamic(this, &ThisClass::HandlePhase4PromptChanged);
 		BoundPhase4World->OnNotification.RemoveDynamic(this, &ThisClass::HandlePhase4Notification);
 	}
+	if (BoundGateActor)
+	{
+		BoundGateActor->OnGatePromptChanged.RemoveDynamic(this, &ThisClass::HandleGatePromptChanged);
+	}
 	BoundObjectiveState = nullptr;
 	BoundPhase2World = nullptr;
 	BoundPhase3World = nullptr;
 	BoundLightningWorld = nullptr;
 	BoundPhase4World = nullptr;
+	BoundGateActor = nullptr;
 
 #if !UE_BUILD_SHIPPING
 	if (ActiveDevelopmentHUD.Get() == this)
@@ -591,6 +607,20 @@ void USOTMIngameUIWidget::HandlePhase4ProgressChanged(
 
 void USOTMIngameUIWidget::HandlePhase4PromptChanged(const bool bVisible, const FText PromptText)
 {
+	if (!Phase4PromptPanel || !Phase4PromptText)
+	{
+		return;
+	}
+	Phase4PromptText->SetText(PromptText);
+	Phase4PromptPanel->SetVisibility(bVisible && !PromptText.IsEmptyOrWhitespace()
+		? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+}
+
+void USOTMIngameUIWidget::HandleGatePromptChanged(const bool bVisible, const FText PromptText)
+{
+	// Reuses the same Phase4PromptPanel/Phase4PromptText widgets the Phase 4 demo
+	// interactables already use - no new widgets needed in WBP_InGameMain. The two
+	// prompt sources are never expected to be active at the same time in practice.
 	if (!Phase4PromptPanel || !Phase4PromptText)
 	{
 		return;

@@ -12,6 +12,9 @@ const FName USOTMObjectiveSubsystem::FindChestId(TEXT("FindChest"));
 const FName USOTMObjectiveSubsystem::ObtainGateKeyId(TEXT("ObtainGateKey"));
 const FName USOTMObjectiveSubsystem::ReachGateId(TEXT("ReachGate"));
 const FName USOTMObjectiveSubsystem::DemoCompleteId(TEXT("DemoComplete"));
+const FName USOTMObjectiveSubsystem::ReachIsabelGateId(TEXT("ReachIsabelGate"));
+const FName USOTMObjectiveSubsystem::UnlockIsabelGateId(TEXT("UnlockIsabelGate"));
+const FName USOTMObjectiveSubsystem::DefeatIsabelId(TEXT("DefeatIsabel"));
 
 void USOTMObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -42,6 +45,12 @@ void USOTMObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		NSLOCTEXT("SOTM", "ReachGate", "Reach the Gate"));
 	InitializeBinaryObjective(DemoComplete, DemoCompleteId,
 		NSLOCTEXT("SOTM", "DemoCompleteObjective", "Demo Complete"));
+	InitializeBinaryObjective(ReachIsabelGate, ReachIsabelGateId,
+		NSLOCTEXT("SOTM", "ReachIsabelGate", "Reach the Gate"));
+	InitializeBinaryObjective(UnlockIsabelGate, UnlockIsabelGateId,
+		NSLOCTEXT("SOTM", "UnlockIsabelGate", "Unlock the Gate with Key"));
+	InitializeBinaryObjective(DefeatIsabel, DefeatIsabelId,
+		NSLOCTEXT("SOTM", "DefeatIsabel", "Defeat Isabel"));
 
 	PlayerState = GetGameInstance() ? GetGameInstance()->GetSubsystem<USOTMPlayerStateSubsystem>() : nullptr;
 	if (PlayerState)
@@ -50,9 +59,11 @@ void USOTMObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		PlayerState->OnCoinsChanged.AddDynamic(this, &ThisClass::HandleCoinsChanged);
 		PlayerState->OnSpeedBoostOwnershipChanged.AddUniqueDynamic(this, &ThisClass::HandleSpeedBoostChanged);
 		PlayerState->OnPhase4ProgressChanged.AddUniqueDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
+		PlayerState->OnIsabelGateProgressChanged.AddUniqueDynamic(this, &ThisClass::HandleIsabelGateProgressChanged);
 	}
 	RefreshFromPersistentCoinState(false);
 	RefreshPhase4Objectives(false);
+	RefreshIsabelGateObjectives(false);
 }
 
 void USOTMObjectiveSubsystem::Deinitialize()
@@ -62,6 +73,7 @@ void USOTMObjectiveSubsystem::Deinitialize()
 		PlayerState->OnCoinsChanged.RemoveDynamic(this, &ThisClass::HandleCoinsChanged);
 		PlayerState->OnSpeedBoostOwnershipChanged.RemoveDynamic(this, &ThisClass::HandleSpeedBoostChanged);
 		PlayerState->OnPhase4ProgressChanged.RemoveDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
+		PlayerState->OnIsabelGateProgressChanged.RemoveDynamic(this, &ThisClass::HandleIsabelGateProgressChanged);
 	}
 	PlayerState = nullptr;
 	Super::Deinitialize();
@@ -73,12 +85,14 @@ void USOTMObjectiveSubsystem::SetForestObjectiveActive(const bool bActive)
 	{
 		RefreshFromPersistentCoinState(true);
 		RefreshPhase4Objectives(true);
+		RefreshIsabelGateObjectives(true);
 		return;
 	}
 
 	bForestObjectiveActive = bActive;
 	RefreshFromPersistentCoinState(true);
 	RefreshPhase4Objectives(true);
+	RefreshIsabelGateObjectives(true);
 	UE_LOG(LogSOTMObjective, Display, TEXT("Forest objective presentation %s."),
 		bForestObjectiveActive ? TEXT("activated") : TEXT("deactivated"));
 }
@@ -91,6 +105,7 @@ void USOTMObjectiveSubsystem::HandleCoinsChanged(
 	(void)LifetimeCoinsCollected;
 	RefreshFromPersistentCoinState(false);
 	RefreshPhase4Objectives(false);
+	RefreshIsabelGateObjectives(false);
 }
 
 void USOTMObjectiveSubsystem::HandleSpeedBoostChanged(const bool bUnlocked, const int32 Level)
@@ -98,6 +113,7 @@ void USOTMObjectiveSubsystem::HandleSpeedBoostChanged(const bool bUnlocked, cons
 	(void)bUnlocked;
 	(void)Level;
 	RefreshPhase4Objectives(false);
+	RefreshIsabelGateObjectives(false);
 }
 
 void USOTMObjectiveSubsystem::HandlePhase4ProgressChanged(
@@ -111,12 +127,30 @@ void USOTMObjectiveSubsystem::HandlePhase4ProgressChanged(
 	(void)bGateUnlocked;
 	(void)bDemoCompleted;
 	RefreshPhase4Objectives(false);
+	RefreshIsabelGateObjectives(false);
+}
+
+void USOTMObjectiveSubsystem::HandleIsabelGateProgressChanged(
+	const bool bReached,
+	const bool bHasKey,
+	const bool bUnlocked)
+{
+	(void)bReached;
+	(void)bHasKey;
+	(void)bUnlocked;
+	RefreshIsabelGateObjectives(false);
 }
 
 TArray<FSOTMObjectiveData> USOTMObjectiveSubsystem::GetChapterOneObjectives() const
 {
+	// FindChest/ObtainGateKey stay - collecting the key from the chest is still
+	// part of the flow, unchanged from before. Only ReachGate/DemoComplete are
+	// left out: those belonged to a second, separate gate object that no
+	// longer exists in the level, and duplicated ReachIsabelGate/UnlockIsabelGate
+	// below, which now represent the one real gate.
 	return { CollectAllForestCoins, UnlockSpeedBoost, UnlockLightningThrow,
-		FindChest, ObtainGateKey, ReachGate, DemoComplete };
+		FindChest, ObtainGateKey,
+		ReachIsabelGate, UnlockIsabelGate, DefeatIsabel };
 }
 
 FSOTMObjectiveData USOTMObjectiveSubsystem::GetActiveChapterOneObjective() const
@@ -235,6 +269,56 @@ ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryCompletePhase4Demo()
 		: ESOTMPhase4ActionResult::SaveFailed;
 }
 
+ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryReachIsabelGate()
+{
+	RefreshPhase4Objectives(false);
+	RefreshIsabelGateObjectives(false);
+	if (!PlayerState)
+	{
+		return ESOTMPhase4ActionResult::InvalidState;
+	}
+	if (PlayerState->IsIsabelGateReached())
+	{
+		return ESOTMPhase4ActionResult::AlreadyCompleted;
+	}
+	// Only counts once the key is already held - just walking up to the gate
+	// before collecting the chest key must NOT complete this objective. The
+	// gate actor also retries this the moment the key is collected while the
+	// player is still standing in range, so the player never has to leave and
+	// re-enter the overlap box to pick it up.
+	if (!PlayerState->HasPhase4GateKey())
+	{
+		return ESOTMPhase4ActionResult::MissingGateKey;
+	}
+	return PlayerState->CommitIsabelGateReached()
+		? ESOTMPhase4ActionResult::Success
+		: ESOTMPhase4ActionResult::SaveFailed;
+}
+
+ESOTMPhase4ActionResult USOTMObjectiveSubsystem::TryUnlockIsabelGate()
+{
+	RefreshIsabelGateObjectives(false);
+	if (!PlayerState)
+	{
+		return ESOTMPhase4ActionResult::InvalidState;
+	}
+	if (PlayerState->IsIsabelGateUnlocked())
+	{
+		return ESOTMPhase4ActionResult::AlreadyCompleted;
+	}
+	if (!PlayerState->IsIsabelGateReached())
+	{
+		return ESOTMPhase4ActionResult::PreviousObjectivesIncomplete;
+	}
+	if (!PlayerState->HasPhase4GateKey())
+	{
+		return ESOTMPhase4ActionResult::MissingGateKey;
+	}
+	return PlayerState->CommitIsabelGateUnlocked()
+		? ESOTMPhase4ActionResult::Success
+		: ESOTMPhase4ActionResult::SaveFailed;
+}
+
 FText USOTMObjectiveSubsystem::GetGateRequirementFeedback() const
 {
 	const bool bCoins = CollectAllForestCoins.State == ESOTMObjectiveState::Completed;
@@ -320,6 +404,31 @@ void USOTMObjectiveSubsystem::RefreshPhase4Objectives(const bool bForceBroadcast
 	BroadcastIfChanged(PreviousKey, ObtainGateKey, bForceBroadcast);
 	BroadcastIfChanged(PreviousGate, ReachGate, bForceBroadcast);
 	BroadcastIfChanged(PreviousDemo, DemoComplete, bForceBroadcast);
+}
+
+void USOTMObjectiveSubsystem::RefreshIsabelGateObjectives(const bool bForceBroadcast)
+{
+	// Standalone chain, independent of the Phase 4 demo sequence - "Reach the Gate" is
+	// always available so overlapping the Mansion Gate completes it right away, and it
+	// shares the same gate key the Phase 4 chest grants (HasPhase4GateKey).
+	const FSOTMObjectiveData PreviousReach = ReachIsabelGate;
+	const FSOTMObjectiveData PreviousUnlockGate = UnlockIsabelGate;
+	const FSOTMObjectiveData PreviousDefeat = DefeatIsabel;
+
+	const bool bReached = PlayerState && PlayerState->IsIsabelGateReached();
+	const bool bUnlocked = PlayerState && PlayerState->IsIsabelGateUnlocked();
+
+	ReachIsabelGate.CurrentProgress = bReached ? 1 : 0;
+	ReachIsabelGate.State = bReached ? ESOTMObjectiveState::Completed : ESOTMObjectiveState::Active;
+	UnlockIsabelGate.CurrentProgress = bUnlocked ? 1 : 0;
+	UnlockIsabelGate.State = bUnlocked ? ESOTMObjectiveState::Completed
+		: (bReached ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked);
+	DefeatIsabel.CurrentProgress = 0;
+	DefeatIsabel.State = bUnlocked ? ESOTMObjectiveState::Active : ESOTMObjectiveState::Locked;
+
+	BroadcastIfChanged(PreviousReach, ReachIsabelGate, bForceBroadcast);
+	BroadcastIfChanged(PreviousUnlockGate, UnlockIsabelGate, bForceBroadcast);
+	BroadcastIfChanged(PreviousDefeat, DefeatIsabel, bForceBroadcast);
 }
 
 void USOTMObjectiveSubsystem::BroadcastIfChanged(

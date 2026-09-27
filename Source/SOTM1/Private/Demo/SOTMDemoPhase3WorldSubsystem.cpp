@@ -653,6 +653,14 @@ void USOTMDemoPhase3WorldSubsystem::OpenUpgradeUI()
 
 void USOTMDemoPhase3WorldSubsystem::CloseUpgradeUI()
 {
+	// Only restore the PC's pre-upgrade-UI cursor/input mode if the upgrade UI was
+	// actually open. CloseUpgradeUI() is also called defensively (Deinitialize, various
+	// dev-acceptance timers, and via ResetRuntimeAfterDeath on every death/Game Over)
+	// regardless of whether the upgrade station was ever open - doing this reset
+	// unconditionally was clobbering whatever cursor/input mode another UI (e.g. the
+	// Game Over screen, opened moments earlier in the same call chain) had just set,
+	// which is why the mouse cursor never stayed visible on Game Over.
+	const bool bWasOpen = UpgradeWidget != nullptr;
 	if (UpgradeWidget)
 	{
 		UpgradeWidget->RemoveFromParent();
@@ -663,13 +671,16 @@ void USOTMDemoPhase3WorldSubsystem::CloseUpgradeUI()
 		PlayerState->ReleaseInputLock(ESOTMInputLockReason::Custom);
 	}
 	bUpgradeInputLockHeld = false;
-	if (UWorld* World = GetWorld())
+	if (bWasOpen)
 	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
+		if (UWorld* World = GetWorld())
 		{
-			PC->bShowMouseCursor = bPreviousMouseCursor;
-			FInputModeGameOnly InputMode;
-			PC->SetInputMode(InputMode);
+			if (APlayerController* PC = World->GetFirstPlayerController())
+			{
+				PC->bShowMouseCursor = bPreviousMouseCursor;
+				FInputModeGameOnly InputMode;
+				PC->SetInputMode(InputMode);
+			}
 		}
 	}
 	if (bPlayerInStationRange)
@@ -718,6 +729,10 @@ void USOTMDemoPhase3WorldSubsystem::OpenSkillTreeUI()
 
 void USOTMDemoPhase3WorldSubsystem::CloseSkillTreeUI()
 {
+	// Same reasoning as CloseUpgradeUI() above: only reset the PC's cursor/input mode
+	// if the skill tree was actually open, so a defensive/unrelated call to this
+	// function never clobbers another UI's cursor/input mode state.
+	const bool bWasOpen = SkillTreeWidget != nullptr;
 	if (SkillTreeWidget)
 	{
 		SkillTreeWidget->RemoveFromParent();
@@ -728,13 +743,16 @@ void USOTMDemoPhase3WorldSubsystem::CloseSkillTreeUI()
 		PlayerState->ReleaseInputLock(ESOTMInputLockReason::Custom);
 	}
 	bSkillTreeInputLockHeld = false;
-	if (UWorld* World = GetWorld())
+	if (bWasOpen)
 	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
+		if (UWorld* World = GetWorld())
 		{
-			PC->bShowMouseCursor = bPreviousMouseCursorSkillTree;
-			FInputModeGameOnly InputMode;
-			PC->SetInputMode(InputMode);
+			if (APlayerController* PC = World->GetFirstPlayerController())
+			{
+				PC->bShowMouseCursor = bPreviousMouseCursorSkillTree;
+				FInputModeGameOnly InputMode;
+				PC->SetInputMode(InputMode);
+			}
 		}
 	}
 }

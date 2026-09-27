@@ -1,6 +1,8 @@
 #include "SOTMPlayerStateSubsystem.h"
 
 #include "Blueprint/UserWidget.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -35,6 +37,7 @@ namespace SOTMPlayerStatePrivate
 	const FString Phase4RecordPrefix(TEXT("SOTM_PHASE4|"));
 	const FString LightningThrowRecordPrefix(TEXT("SOTM_LIGHTNING|"));
 	const FString SkillTreeRecordPrefix(TEXT("SOTM_SKILLTREE|"));
+	const FString IsabelGateRecordPrefix(TEXT("SOTM_ISABELGATE|"));
 
 	bool GetBoolProperty(const UObject* Object, const FName Name, bool& OutValue)
 	{
@@ -199,6 +202,18 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		TEXT("Grants (or, with a negative amount, removes) Ability Points and immediately saves them, e.g. 'SOTM.GrantAbilityPoints 50'."),
 		FConsoleCommandWithArgsDelegate::CreateUObject(
 			this, &USOTMPlayerStateSubsystem::HandleGrantAbilityPointsCommand));
+
+	GiveIsabelGateKeyConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("SOTM.GiveIsabelGateKey"),
+		TEXT("Testing only: grants the Mansion Gate key (no in-world key pickup exists yet), e.g. 'SOTM.GiveIsabelGateKey'."),
+		FConsoleCommandWithArgsDelegate::CreateUObject(
+			this, &USOTMPlayerStateSubsystem::HandleGiveIsabelGateKeyCommand));
+
+	ResetIsabelGateConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("SOTM.ResetIsabelGate"),
+		TEXT("Testing only: clears the Mansion Gate's reached/key/unlocked progress and saves, so you can replay the overlap->unlock flow, e.g. 'SOTM.ResetIsabelGate'."),
+		FConsoleCommandWithArgsDelegate::CreateUObject(
+			this, &USOTMPlayerStateSubsystem::HandleResetIsabelGateCommand));
 }
 
 void USOTMPlayerStateSubsystem::Deinitialize()
@@ -207,6 +222,17 @@ void USOTMPlayerStateSubsystem::Deinitialize()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GrantAbilityPointsConsoleCommand);
 		GrantAbilityPointsConsoleCommand = nullptr;
+	}
+
+	if (GiveIsabelGateKeyConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GiveIsabelGateKeyConsoleCommand);
+		GiveIsabelGateKeyConsoleCommand = nullptr;
+	}
+	if (ResetIsabelGateConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(ResetIsabelGateConsoleCommand);
+		ResetIsabelGateConsoleCommand = nullptr;
 	}
 
 	if (UWorld* World = GetWorld())
@@ -303,7 +329,19 @@ bool USOTMPlayerStateSubsystem::TryCollectCoin(
 
 	CollectedCoinIds.Add(PersistentCoinId);
 	AvailableCoins = FMath::Max(0, AvailableCoins + CoinValue);
+
+	// Every 10 lifetime coins collected grants 1 Ability Point. Comparing the
+	// "tens" bucket before/after (rather than just checking `% 10 == 0`) means
+	// a multi-value pickup that crosses more than one multiple of 10 in a
+	// single collect still grants the correct number of points.
+	const int32 PreviousLifetimeCoins = LifetimeCoinsCollected;
 	LifetimeCoinsCollected = FMath::Max(0, LifetimeCoinsCollected + CoinValue);
+	const int32 AbilityPointsEarned = (LifetimeCoinsCollected / 10) - (PreviousLifetimeCoins / 10);
+	if (AbilityPointsEarned > 0)
+	{
+		AbilityPoints += AbilityPointsEarned;
+	}
+
 	bCoinStateDirty = true;
 	OnCoinCollected.Broadcast(CoinValue, AvailableCoins);
 	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
@@ -311,11 +349,13 @@ bool USOTMPlayerStateSubsystem::TryCollectCoin(
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("SOTM Coin: collected id=%s value=%d available=%d lifetime=%d"),
+		TEXT("SOTM Coin: collected id=%s value=%d available=%d lifetime=%d abilityPointsEarned=%d totalAbilityPoints=%d"),
 		*PersistentCoinId.ToString(EGuidFormats::DigitsWithHyphens),
 		CoinValue,
 		AvailableCoins,
-		LifetimeCoinsCollected);
+		LifetimeCoinsCollected,
+		AbilityPointsEarned,
+		AbilityPoints);
 
 	// Persist only after the authoritative transaction has succeeded. SavePlayerState
 	// resolves the active Menu System Pro slot used by Continue, so a player may quit
@@ -561,6 +601,78 @@ void USOTMPlayerStateSubsystem::HandleGrantAbilityPointsCommand(const TArray<FSt
 	UE_LOG(LogTemp, Display, TEXT("SOTM.GrantAbilityPoints: granted %d, now have %d (saved)."), Amount, AbilityPoints);
 }
 
+void USOTMPlayerStateSubsystem::HandleGiveIsabelGateKeyCommand(const TArray<FString>& Args)
+{
+	// The Mansion Gate unlocks with the same key the Phase 4 chest grants, so this
+	// testing command now just grants that shared key rather than a separate one.
+	(void)Args;
+	CommitPhase4GateKey();
+	UE_LOG(LogTemp, Display, TEXT("SOTM.GiveIsabelGateKey: granted shared gate key (HasKey=%d, saved)."), bPhase4HasGateKey);
+}
+
+void USOTMPlayerStateSubsystem::HandleResetIsabelGateCommand(const TArray<FString>& Args)
+{
+	// Testing convenience: the gate's own state is normally one-way (Commit* only
+	// ever sets flags true), so once you've unlocked it in a save there is no way
+	// back to the closed/prompt-visible state without this. Does NOT touch the
+	// shared Phase4 gate key (bPhase4HasGateKey) - only the gate's own progress.
+	(void)Args;
+	bIsabelGateReached = false;
+	bHasIsabelGateKey = false;
+	bIsabelGateUnlocked = false;
+	SavePlayerStateInternal(TEXT("IsabelGateReset"));
+	OnIsabelGateProgressChanged.Broadcast(bIsabelGateReached, bHasIsabelGateKey, bIsabelGateUnlocked);
+	UE_LOG(LogTemp, Display, TEXT("SOTM.ResetIsabelGate: cleared reached/key/unlocked and saved."));
+}
+
+bool USOTMPlayerStateSubsystem::CommitIsabelGateReached()
+{
+	if (bIsabelGateReached)
+	{
+		return true;
+	}
+	bIsabelGateReached = true;
+	if (!SavePlayerStateInternal(TEXT("IsabelGateReached")))
+	{
+		bIsabelGateReached = false;
+		return false;
+	}
+	OnIsabelGateProgressChanged.Broadcast(bIsabelGateReached, bHasIsabelGateKey, bIsabelGateUnlocked);
+	return true;
+}
+
+bool USOTMPlayerStateSubsystem::CommitIsabelGateKey()
+{
+	if (bHasIsabelGateKey)
+	{
+		return true;
+	}
+	bHasIsabelGateKey = true;
+	if (!SavePlayerStateInternal(TEXT("IsabelGateKey")))
+	{
+		bHasIsabelGateKey = false;
+		return false;
+	}
+	OnIsabelGateProgressChanged.Broadcast(bIsabelGateReached, bHasIsabelGateKey, bIsabelGateUnlocked);
+	return true;
+}
+
+bool USOTMPlayerStateSubsystem::CommitIsabelGateUnlocked()
+{
+	if (bIsabelGateUnlocked)
+	{
+		return true;
+	}
+	bIsabelGateUnlocked = true;
+	if (!SavePlayerStateInternal(TEXT("IsabelGateUnlocked")))
+	{
+		bIsabelGateUnlocked = false;
+		return false;
+	}
+	OnIsabelGateProgressChanged.Broadcast(bIsabelGateReached, bHasIsabelGateKey, bIsabelGateUnlocked);
+	return true;
+}
+
 float USOTMPlayerStateSubsystem::GetEffectiveSpeedBoostDuration() const
 {
 	float Value = GetDefault<USOTMPhase3Settings>()->SpeedBoostDuration;
@@ -683,6 +795,7 @@ bool USOTMPlayerStateSubsystem::ForceRespawnAtCheckpoint()
 
 bool USOTMPlayerStateSubsystem::RetryFromGameOver()
 {
+	UE_LOG(LogTemp, Display, TEXT("SOTM Game Over: RetryFromGameOver called (bGameOver=%d)."), bGameOver);
 	if (!bGameOver)
 	{
 		return false;
@@ -691,6 +804,7 @@ bool USOTMPlayerStateSubsystem::RetryFromGameOver()
 	const USOTMPlayerSystemSettings* Settings = GetDefault<USOTMPlayerSystemSettings>();
 	if (Settings->RetryPolicy == ESOTMGameOverRetryPolicy::Disabled)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("SOTM Game Over: RetryFromGameOver no-op - RetryPolicy is Disabled in Project Settings > Game > SOTM Player System > Game Over."));
 		return false;
 	}
 
@@ -706,11 +820,24 @@ bool USOTMPlayerStateSubsystem::RetryFromGameOver()
 
 void USOTMPlayerStateSubsystem::ReturnToMainMenu()
 {
+	UE_LOG(LogTemp, Display, TEXT("SOTM Game Over: ReturnToMainMenu called, opening %s."),
+		*GetDefault<USOTMPlayerSystemSettings>()->MainMenuMap.ToString());
 	HideGameOverWidget();
 	bGameOver = false;
 	bPlayerDead = false;
 	bDeathProcessing = false;
 	ClearAllInputLocks();
+
+	// AddToViewport widgets (the Game Over screen just hidden above, but also the
+	// in-game HUD and any other UI left over from gameplay) are owned by the
+	// UGameViewportClient, which is NOT destroyed by OpenLevel() - only the World and
+	// its actors are. Without this, leftover UI stays rendered on top of the newly
+	// loaded main menu level even though HideGameOverWidget() already removed the Game
+	// Over screen specifically.
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->RemoveAllViewportWidgets();
+	}
 
 	if (UWorld* World = GetWorld())
 	{
@@ -1196,6 +1323,24 @@ void USOTMPlayerStateSubsystem::PerformRespawn()
 	bPlayerDead = false;
 	bDeathProcessing = false;
 
+	// Continuing from a Game Over save (LoadPlayerStateFromSlot -> checkpoint travel)
+	// runs this same successful-respawn path with CurrentLives still at the 0 the save
+	// was written with, and with bGameOver left set by ApplyLoadedStateToBoundPlayer's
+	// resume-Game-Over branch. A respawn that actually reaches this point means the
+	// player is back in the world and playable, so any lingering Game Over UI/state
+	// must be cleared here too - mirroring RetryFromGameOver's own cleanup - or the
+	// widget is left stuck on screen over an otherwise-working game.
+	if (bGameOver)
+	{
+		HideGameOverWidget();
+		bGameOver = false;
+		CurrentLives = Settings->RetryPolicy == ESOTMGameOverRetryPolicy::RestoreOneLifeAtCheckpoint
+			? 1
+			: MaximumLives;
+		OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
+		ClearInputLock(ESOTMInputLockReason::GameOver);
+	}
+
 	ClearInputLock(ESOTMInputLockReason::Death);
 	ClearInputLock(ESOTMInputLockReason::Respawn);
 	SyncLegacyCharacterState();
@@ -1247,13 +1392,39 @@ void USOTMPlayerStateSubsystem::ShowGameOverWidget()
 		return;
 	}
 
-	GameOverWidget = CreateWidget<USOTMGameOverWidget>(PlayerController, USOTMGameOverWidget::StaticClass());
+	// UI is built in the Designer (WBP_GameOver, a Blueprint subclass of
+	// USOTMGameOverWidget) instead of the old hand-built Slate widget, so load that
+	// class if one is configured - same pattern as
+	// USOTMDemoPhase3WorldSubsystem::OpenSkillTreeUI reading SkillTreeWidgetClass.
+	TSubclassOf<USOTMGameOverWidget> GameOverWidgetClass =
+		GetDefault<USOTMPlayerSystemSettings>()->GameOverWidgetClass;
+	if (!GameOverWidgetClass)
+	{
+		GameOverWidgetClass = USOTMGameOverWidget::StaticClass();
+	}
+	GameOverWidget = CreateWidget<USOTMGameOverWidget>(PlayerController, GameOverWidgetClass);
 	if (GameOverWidget)
 	{
 		GameOverWidget->AddToViewport(10000);
+
+		// SetWidgetToFocus matters here, not just cosmetically: without it, Slate keeps
+		// whatever had focus before (usually the game viewport), and the FIRST click on
+		// any button in the new widget can get consumed just shifting focus onto this
+		// widget rather than actually firing that button's OnClicked - which looks
+		// exactly like "I clicked Main Menu and nothing happened." Explicitly focusing
+		// this widget's Slate root avoids that.
 		FInputModeUIOnly InputMode;
-		PlayerController->SetInputMode(InputMode);
+		InputMode.SetWidgetToFocus(GameOverWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PlayerController->SetShowMouseCursor(true);
+		PlayerController->SetInputMode(InputMode);
+		UE_LOG(LogTemp, Display, TEXT("SOTM Game Over: widget shown (class=%s), mouse cursor + UI-only input mode applied."),
+			*GameOverWidgetClass->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("SOTM Game Over: CreateWidget<USOTMGameOverWidget> failed (class=%s)."),
+			*GameOverWidgetClass->GetName());
 	}
 }
 
@@ -1350,18 +1521,53 @@ void USOTMPlayerStateSubsystem::ApplyLoadedStateToBoundPlayer()
 	PersistentHealth = HealthToApply;
 	bHasInitializedPlayerHealth = true;
 
-	if (CurrentLives <= 0)
+	// The Main Menu's own preview/placeholder pawn binds through this exact same
+	// path (see BindPlayer). A save with CurrentLives<=0 - which is exactly the
+	// state left behind by the death that sent the player to the Main Menu in the
+	// first place - must not re-trigger Game Over on top of the Main Menu itself.
+	// Only a real gameplay level binding a genuinely-dead player should resume it.
+	const USOTMPlayerSystemSettings* Settings = GetDefault<USOTMPlayerSystemSettings>();
+	const bool bIsMainMenuMap = CurrentGameplayMap == Settings->MainMenuMap;
+	if (!bIsMainMenuMap)
 	{
-		bGameOver = false;
-		bPlayerDead = true;
-		bDeathProcessing = true;
-		BoundVitalComponent->SetInvulnerable(true);
-		TriggerGameOver();
-	}
-	else
-	{
-		bPlayerDead = false;
-		bDeathProcessing = false;
+		// A dead (CurrentLives<=0) save can be loaded two different ways: through the
+		// Main Menu's Continue button (which travels here and then calls
+		// PerformRespawn), or by simply entering/relaunching straight into a gameplay
+		// level whose auto-loaded save happens to be dead (PrepareForGameplayWorld's
+		// GameplayWorld sync - no travel, no PerformRespawn ever runs). Both cases land
+		// the player on a map with a valid checkpoint they can actually continue from,
+		// so both must be treated as a continue, not a fresh Game Over - otherwise the
+		// Game Over screen is shown (or left showing) over an already-playable game.
+		const bool bCanContinueHere =
+			Settings->RetryPolicy != ESOTMGameOverRetryPolicy::Disabled &&
+			CheckpointState.bIsValid &&
+			CheckpointState.MapPackageName == CurrentGameplayMap;
+
+		if (CurrentLives <= 0 && !bCanContinueHere)
+		{
+			bGameOver = false;
+			bPlayerDead = true;
+			bDeathProcessing = true;
+			BoundVitalComponent->SetInvulnerable(true);
+			TriggerGameOver();
+		}
+		else
+		{
+			if (CurrentLives <= 0)
+			{
+				// Same lives restoration RetryFromGameOver applies, so a save that was
+				// written at 0 lives comes back playable instead of stuck on Game Over.
+				CurrentLives = Settings->RetryPolicy == ESOTMGameOverRetryPolicy::RestoreOneLifeAtCheckpoint
+					? 1
+					: MaximumLives;
+				OnLivesChanged.Broadcast(CurrentLives, MaximumLives);
+				bGameOver = false;
+				HideGameOverWidget();
+				ClearInputLock(ESOTMInputLockReason::GameOver);
+			}
+			bPlayerDead = false;
+			bDeathProcessing = false;
+		}
 	}
 	SyncLegacyCharacterState();
 }
@@ -1507,6 +1713,11 @@ bool USOTMPlayerStateSubsystem::WriteStateToSaveObject(UObject* SaveObject) cons
 		*SOTMPlayerStatePrivate::SkillTreeRecordPrefix,
 		AbilityPoints,
 		*FString::Join(SerializedSkillUpgrades, TEXT(","))));
+	SerializedCoinIds.Add(FString::Printf(TEXT("%s%d|%d|%d"),
+		*SOTMPlayerStatePrivate::IsabelGateRecordPrefix,
+		bIsabelGateReached ? 1 : 0,
+		bHasIsabelGateKey ? 1 : 0,
+		bIsabelGateUnlocked ? 1 : 0));
 	const bool bCollectedCoinIdsWritten =
 		SOTMPlayerStatePrivate::SetStringProperty(
 			SaveObject,
@@ -1587,6 +1798,9 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bool bLoadedPhase4HasGateKey = false;
 	bool bLoadedPhase4GateUnlocked = false;
 	bool bLoadedPhase4DemoCompleted = false;
+	bool bLoadedIsabelGateReached = false;
+	bool bLoadedHasIsabelGateKey = false;
+	bool bLoadedIsabelGateUnlocked = false;
 	int32 LoadedAbilityPoints = 0;
 	TMap<FName, int32> LoadedSkillUpgradeLevels;
 	FString LoadedCoinIds;
@@ -1697,6 +1911,18 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 			}
 			continue;
 		}
+		if (SaveVersion >= 7 && SerializedId.StartsWith(SOTMPlayerStatePrivate::IsabelGateRecordPrefix))
+		{
+			TArray<FString> Fields;
+			SerializedId.ParseIntoArray(Fields, TEXT("|"), false);
+			if (Fields.Num() == 4)
+			{
+				bLoadedIsabelGateReached = FCString::Atoi(*Fields[1]) != 0;
+				bLoadedHasIsabelGateKey = FCString::Atoi(*Fields[2]) != 0;
+				bLoadedIsabelGateUnlocked = FCString::Atoi(*Fields[3]) != 0;
+			}
+			continue;
+		}
 		FGuid CoinId;
 		if (FGuid::Parse(SerializedId, CoinId) && CoinId.IsValid())
 		{
@@ -1717,6 +1943,9 @@ bool USOTMPlayerStateSubsystem::ReadStateFromSaveObject(UObject* SaveObject)
 	bPhase4HasGateKey = bLoadedPhase4HasGateKey || bPhase4ChestOpened;
 	bPhase4GateUnlocked = bLoadedPhase4GateUnlocked;
 	bPhase4DemoCompleted = bLoadedPhase4DemoCompleted;
+	bIsabelGateReached = bLoadedIsabelGateReached;
+	bHasIsabelGateKey = bLoadedHasIsabelGateKey;
+	bIsabelGateUnlocked = bLoadedIsabelGateUnlocked;
 	AbilityPoints = LoadedAbilityPoints;
 	SkillUpgradeLevels = LoadedSkillUpgradeLevels;
 	bCoinStateDirty = false;

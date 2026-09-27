@@ -57,6 +57,10 @@ public:
 	static const FName ObtainGateKeyId;
 	static const FName ReachGateId;
 	static const FName DemoCompleteId;
+	// Standalone Mansion Gate chain (leads to the Isabel encounter) - separate from Phase 4.
+	static const FName ReachIsabelGateId;
+	static const FName UnlockIsabelGateId;
+	static const FName DefeatIsabelId;
 	static constexpr int32 TotalForestCoins = 15; // TEMP: testing threshold, was 330
 
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -84,6 +88,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SOTM|Objective|Phase 4")
 	ESOTMPhase4ActionResult TryCompletePhase4Demo();
 
+	UFUNCTION(BlueprintCallable, Category="SOTM|Objective|Gate|Isabel")
+	ESOTMPhase4ActionResult TryReachIsabelGate();
+
+	UFUNCTION(BlueprintCallable, Category="SOTM|Objective|Gate|Isabel")
+	ESOTMPhase4ActionResult TryUnlockIsabelGate();
+
 	UFUNCTION(BlueprintPure, Category="SOTM|Objective|Phase 4")
 	FText GetGateRequirementFeedback() const;
 
@@ -107,8 +117,12 @@ private:
 		bool bGateUnlocked,
 		bool bDemoCompleted);
 
+	UFUNCTION()
+	void HandleIsabelGateProgressChanged(bool bReached, bool bHasKey, bool bUnlocked);
+
 	void RefreshFromPersistentCoinState(bool bForceBroadcast);
 	void RefreshPhase4Objectives(bool bForceBroadcast);
+	void RefreshIsabelGateObjectives(bool bForceBroadcast);
 	void BroadcastIfChanged(
 		const FSOTMObjectiveData& Previous,
 		const FSOTMObjectiveData& Current,
@@ -136,6 +150,15 @@ private:
 
 	UPROPERTY(Transient)
 	FSOTMObjectiveData DemoComplete;
+
+	UPROPERTY(Transient)
+	FSOTMObjectiveData ReachIsabelGate;
+
+	UPROPERTY(Transient)
+	FSOTMObjectiveData UnlockIsabelGate;
+
+	UPROPERTY(Transient)
+	FSOTMObjectiveData DefeatIsabel;
 
 	bool bForestObjectiveActive = false;
 };

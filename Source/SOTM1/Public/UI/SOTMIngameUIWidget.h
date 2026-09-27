@@ -16,6 +16,7 @@ class USOTMDemoPhase2WorldSubsystem;
 class USOTMLightningThrowWorldSubsystem;
 class USOTMDemoPhase3WorldSubsystem;
 class USOTMDemoPhase4WorldSubsystem;
+class ASOTMKeyGateActor;
 class USOTMObjectiveSubsystem;
 class USOTMPlayerStateSubsystem;
 
@@ -122,6 +123,9 @@ private:
 	void HandlePhase4PromptChanged(bool bVisible, FText PromptText);
 
 	UFUNCTION()
+	void HandleGatePromptChanged(bool bVisible, FText PromptText);
+
+	UFUNCTION()
 	void HandlePhase4Notification(FText Title, FText Detail);
 
 	UFUNCTION()
@@ -149,10 +153,16 @@ private:
 	// --- Designer-bound widgets ---------------------------------------------
 	// These are no longer constructed in code (see EnsureProductionHUD in the
 	// .cpp). Build a widget of the matching type and EXACT name below inside
-	// WBP_IngameUI's Designer canvas and UMG will wire the pointer up for you
-	// on compile. BindWidgetOptional (rather than BindWidget) means a widget
-	// that hasn't been built yet in the Designer is simply left null instead
-	// of failing the Blueprint compile, so this can be migrated incrementally.
+	// /Game/UI/Horror/WBP_InGameMain's Designer canvas (NOT the MenuSystemPro
+	// example widget WBP_IngameUI under MenuSystemPro/ExampleContent - that
+	// one is never spawned at runtime) and UMG will wire the pointer up for
+	// you on compile. BindWidgetOptional (rather than BindWidget) means a
+	// widget that hasn't been built yet in the Designer is simply left null
+	// instead of failing the Blueprint compile, so this can be migrated
+	// incrementally. Each widget must be placed DIRECTLY in WBP_InGameMain's
+	// own widget tree (not nested inside a separate child UserWidget placed
+	// inside it) and must be the exact class listed (e.g. Border, not
+	// Overlay/SizeBox/ScaleBox) or the binding silently stays null.
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> ObjectivePanel;
 
@@ -274,6 +284,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USOTMDemoPhase4WorldSubsystem> BoundPhase4World;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ASOTMKeyGateActor> BoundGateActor;
 
 	FTimerHandle CoinPulseTimerHandle;
 	FTimerHandle LivesPulseTimerHandle;
