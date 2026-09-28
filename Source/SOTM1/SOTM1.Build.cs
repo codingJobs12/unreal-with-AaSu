@@ -21,7 +21,8 @@ public class SOTM1 : ModuleRules
 			"LevelSequence",
 			"MovieScene",
 			"UMG",
-			"DeveloperSettings"
+			"DeveloperSettings",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "ImageWrapper" });

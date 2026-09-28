@@ -257,15 +257,24 @@ void USOTMDemoPhase4WorldSubsystem::HandleInteractInput()
 	{
 		return;
 	}
-	// Key takes priority: once the chest is open and the key is out, that's the only thing
-	// pressing E near the chest should do until it's actually picked up.
-	if (bNearKey)
+	// Collecting the key reuses the SAME chest trigger (bNearChest) rather than a
+	// separate sphere spawned at interact time - that separate sphere had a
+	// spawn-order bug (its first overlap could fire before anything was
+	// listening) and was extra complexity for no benefit, since the player is
+	// already standing in the chest's trigger by definition. Pressing E near
+	// the chest opens it if it's still closed, or collects the key once it's
+	// open (and not yet collected) - interaction with the key is only enabled
+	// after the chest is actually open.
+	if (bNearChest)
 	{
-		InteractWithKey();
-	}
-	else if (bNearChest)
-	{
-		InteractWithChest();
+		if (!PlayerState->IsPhase4ChestOpened())
+		{
+			InteractWithChest();
+		}
+		else if (!PlayerState->HasPhase4GateKey())
+		{
+			InteractWithKey();
+		}
 	}
 	else if (bNearGate)
 	{
@@ -304,24 +313,25 @@ void USOTMDemoPhase4WorldSubsystem::RefreshPrompt()
 		OnPromptChanged.Broadcast(false, FText::GetEmpty());
 		return;
 	}
-	if (bNearKey && !PlayerState->HasPhase4GateKey())
-	{
-		OnPromptChanged.Broadcast(true, NSLOCTEXT("SOTM", "CollectKeyPrompt", "[E]  COLLECT KEY"));
-		return;
-	}
 	if (bNearChest)
 	{
-		if (PlayerState->IsPhase4ChestOpened())
-		{
-			OnPromptChanged.Broadcast(true, NSLOCTEXT("SOTM", "ChestAlreadyOpened", "CHEST OPENED"));
-		}
-		else
+		if (!PlayerState->IsPhase4ChestOpened())
 		{
 			const FSOTMObjectiveData Active = Objectives ? Objectives->GetActiveChapterOneObjective() : FSOTMObjectiveData();
 			OnPromptChanged.Broadcast(true,
 				Active.ObjectiveId == USOTMObjectiveSubsystem::FindChestId
 					? NSLOCTEXT("SOTM", "OpenChestPrompt", "[E]  OPEN CHEST")
 					: NSLOCTEXT("SOTM", "ChestLockedPrompt", "COMPLETE PREVIOUS OBJECTIVES"));
+		}
+		else if (!PlayerState->HasPhase4GateKey())
+		{
+			// Toggles the instant the chest opens - same trigger as the chest
+			// itself, no separate sphere/spawn-timing to worry about.
+			OnPromptChanged.Broadcast(true, NSLOCTEXT("SOTM", "CollectKeyPrompt", "[E]  COLLECT KEY"));
+		}
+		else
+		{
+			OnPromptChanged.Broadcast(true, NSLOCTEXT("SOTM", "ChestAlreadyOpened", "CHEST OPENED"));
 		}
 		return;
 	}
@@ -351,7 +361,9 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithChest()
 			UGameplayStatics::PlaySoundAtLocation(this, Sound, ChestArt ? ChestArt->GetActorLocation() : FVector::ZeroVector, 0.60f);
 		}
 		// Opening the chest only reveals the key now - it isn't collected (and the objective
-		// doesn't update) until the player walks up and presses E on it. See InteractWithKey.
+		// doesn't update) until the player presses E again. See InteractWithKey. The chest's
+		// own trigger (bNearChest) is reused for this, so the prompt below updates to
+		// COLLECT KEY immediately - no separate key-specific trigger needed.
 		BeginChestPresentation(false);
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "ChestOpened", "CHEST OPENED"),
@@ -384,19 +396,13 @@ void USOTMDemoPhase4WorldSubsystem::InteractWithKey()
 		{
 			UGameplayStatics::PlaySound2D(this, Sound, 0.58f);
 		}
-		// The key has been picked up - clear the visual and its interaction anchor so it can't
-		// be collected again.
-		if (KeyAnchor)
-		{
-			KeyAnchor->Destroy();
-			KeyAnchor = nullptr;
-		}
+		// The key has been picked up - clear its visual so it can't be "collected" again
+		// (HasPhase4GateKey() is the actual guard; this just removes the floating mesh).
 		if (KeyPresentation)
 		{
 			KeyPresentation->Destroy();
 			KeyPresentation = nullptr;
 		}
-		bNearKey = false;
 		OnNotification.Broadcast(
 			NSLOCTEXT("SOTM", "GateKeyAcquired", "GATE KEY ACQUIRED"),
 			NSLOCTEXT("SOTM", "ReachGateUpdated", "OBJECTIVE UPDATED  -  REACH THE GATE"));
@@ -468,23 +474,9 @@ void USOTMDemoPhase4WorldSubsystem::BeginChestPresentation(const bool bRestoreIm
 				KeyComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 				KeyPresentation->SetActorScale3D(FVector(2.2f));
 			}
-			// The key mesh itself has no collision (it's purely visual, floating and spinning) -
-			// a separate interaction anchor is what actually lets the player press E to collect it.
-			if (!KeyAnchor)
-			{
-				FActorSpawnParameters AnchorParams;
-				AnchorParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-				AnchorParams.ObjectFlags |= RF_Transient;
-				const FVector KeyRestLocation = ChestClosedTransform.GetLocation() + FVector(0, 0, 190.0f);
-				KeyAnchor = GetWorld()->SpawnActor<ASOTMPhase4Interactable>(
-					ASOTMPhase4Interactable::StaticClass(), KeyRestLocation, FRotator::ZeroRotator, AnchorParams);
-				if (KeyAnchor)
-				{
-					KeyAnchor->Configure(ESOTMPhase4InteractableKind::Key, 150.0f);
-					KeyAnchor->OnPlayerEntered.AddUObject(this, &ThisClass::HandleEntered);
-					KeyAnchor->OnPlayerExited.AddUObject(this, &ThisClass::HandleExited);
-				}
-			}
+			// The key mesh itself has no collision (it's purely visual, floating and
+			// spinning) - collecting it is driven entirely by the chest's own trigger
+			// (bNearChest), not a separate anchor/sphere.
 		}
 	}
 	if (bRestoreImmediately)

@@ -22,6 +22,16 @@ public:
 	void Configure(ESOTMPhase4InteractableKind InKind, float Radius);
 	ESOTMPhase4InteractableKind GetKind() const { return Kind; }
 
+	/** Broadcasts OnPlayerEntered for any actor ALREADY overlapping InteractionSphere
+	 * right now. Needed because this actor is spawned by SpawnActor (which registers
+	 * its components and evaluates initial overlaps as part of that same call) BEFORE
+	 * the caller has a chance to bind OnPlayerEntered - so if the player is already
+	 * standing inside the sphere the moment this spawns (e.g. the key popping up right
+	 * next to the chest they're standing at), the very first overlap fires to nobody
+	 * and is silently lost. Call this once right after binding OnPlayerEntered/
+	 * OnPlayerExited to catch that case. */
+	void RefreshInitialOverlapState();
+
 	FSOTMPhase4OverlapEvent OnPlayerEntered;
 	FSOTMPhase4OverlapEvent OnPlayerExited;
 

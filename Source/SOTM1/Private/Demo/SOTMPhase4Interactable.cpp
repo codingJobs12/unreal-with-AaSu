@@ -2,6 +2,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
+#include "GameFramework/Pawn.h"
 
 ASOTMPhase4Interactable::ASOTMPhase4Interactable()
 {
@@ -25,6 +26,20 @@ void ASOTMPhase4Interactable::Configure(const ESOTMPhase4InteractableKind InKind
 {
 	Kind = InKind;
 	InteractionSphere->SetSphereRadius(FMath::Max(100.0f, Radius), true);
+}
+
+void ASOTMPhase4Interactable::RefreshInitialOverlapState()
+{
+	if (!InteractionSphere)
+	{
+		return;
+	}
+	TArray<AActor*> OverlappingActors;
+	InteractionSphere->GetOverlappingActors(OverlappingActors, APawn::StaticClass());
+	for (AActor* Actor : OverlappingActors)
+	{
+		OnPlayerEntered.Broadcast(Kind, Actor);
+	}
 }
 
 void ASOTMPhase4Interactable::HandleBeginOverlap(
