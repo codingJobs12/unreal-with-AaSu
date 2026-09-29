@@ -3,6 +3,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Components/BoxComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -214,6 +215,12 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		TEXT("Testing only: clears the Mansion Gate's reached/key/unlocked progress and saves, so you can replay the overlap->unlock flow, e.g. 'SOTM.ResetIsabelGate'."),
 		FConsoleCommandWithArgsDelegate::CreateUObject(
 			this, &USOTMPlayerStateSubsystem::HandleResetIsabelGateCommand));
+
+	GoToIsabelArenaConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("SOTM.GoToIsabelArena"),
+		TEXT("Testing only: teleports the player near the level's actor tagged 'IsabelArena', e.g. 'SOTM.GoToIsabelArena'."),
+		FConsoleCommandWithArgsDelegate::CreateUObject(
+			this, &USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand));
 }
 
 void USOTMPlayerStateSubsystem::Deinitialize()
@@ -233,6 +240,11 @@ void USOTMPlayerStateSubsystem::Deinitialize()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(ResetIsabelGateConsoleCommand);
 		ResetIsabelGateConsoleCommand = nullptr;
+	}
+	if (GoToIsabelArenaConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GoToIsabelArenaConsoleCommand);
+		GoToIsabelArenaConsoleCommand = nullptr;
 	}
 
 	if (UWorld* World = GetWorld())
@@ -623,6 +635,56 @@ void USOTMPlayerStateSubsystem::HandleResetIsabelGateCommand(const TArray<FStrin
 	SavePlayerStateInternal(TEXT("IsabelGateReset"));
 	OnIsabelGateProgressChanged.Broadcast(bIsabelGateReached, bHasIsabelGateKey, bIsabelGateUnlocked);
 	UE_LOG(LogTemp, Display, TEXT("SOTM.ResetIsabelGate: cleared reached/key/unlocked and saved."));
+}
+
+void USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand(const TArray<FString>& Args)
+{
+	// Testing convenience only - finds the level actor tagged "IsabelArena" (add
+	// that tag to BP_IsabelArena's Actor > Tags in the level) and teleports the
+	// player pawn to its Box component, so you don't have to walk the level each
+	// time to test the boss fight.
+	(void)Args;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no World available."));
+		return;
+	}
+
+	static const FName IsabelArenaTag(TEXT("IsabelArena"));
+	TArray<AActor*> ArenaActors;
+	UGameplayStatics::GetAllActorsWithTag(World, IsabelArenaTag, ArenaActors);
+	if (ArenaActors.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no actor tagged 'IsabelArena' found - add that tag to BP_IsabelArena's Actor > Tags in the level."));
+		return;
+	}
+
+	const AActor* Arena = ArenaActors[0];
+	FVector TargetLocation = Arena->GetActorLocation();
+	if (const UBoxComponent* ArenaBox = Arena->FindComponentByClass<UBoxComponent>())
+	{
+		TargetLocation = ArenaBox->GetComponentLocation();
+	}
+	TargetLocation.Z += 100.0f;
+
+	AActor* PlayerActor = BoundPlayerActor.Get();
+	if (!PlayerActor)
+	{
+		if (const APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PlayerActor = PC->GetPawn();
+		}
+	}
+	if (!PlayerActor)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no player pawn found."));
+		return;
+	}
+
+	PlayerActor->SetActorLocation(TargetLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	UE_LOG(LogTemp, Display, TEXT("SOTM.GoToIsabelArena: teleported player to (%s)."), *TargetLocation.ToString());
 }
 
 bool USOTMPlayerStateSubsystem::CommitIsabelGateReached()

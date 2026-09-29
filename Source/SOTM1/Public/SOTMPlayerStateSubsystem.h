@@ -377,6 +377,12 @@ private:
 	void HandleGiveIsabelGateKeyCommand(const TArray<FString>& Args);
 	void HandleResetIsabelGateCommand(const TArray<FString>& Args);
 
+	// Handler for the "SOTM.GoToIsabelArena" testing console command (registered/
+	// unregistered in Initialize/Deinitialize) - teleports the player pawn to the
+	// level's actor tagged "IsabelArena", for fast-testing the boss fight without
+	// having to walk the whole level each time.
+	void HandleGoToIsabelArenaCommand(const TArray<FString>& Args);
+
 	UPROPERTY(Transient)
 	int32 CurrentLives = 5;
 
@@ -395,6 +401,7 @@ private:
 	IConsoleObject* GrantAbilityPointsConsoleCommand = nullptr;
 	IConsoleObject* GiveIsabelGateKeyConsoleCommand = nullptr;
 	IConsoleObject* ResetIsabelGateConsoleCommand = nullptr;
+	IConsoleObject* GoToIsabelArenaConsoleCommand = nullptr;
 
 	UPROPERTY(Transient)
 	bool bSpeedBoostUnlocked = false;

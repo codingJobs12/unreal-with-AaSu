@@ -7,6 +7,7 @@
 #include "EnhancedInputComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
@@ -70,6 +71,12 @@ void ASOTMKeyGateActor::BeginPlay()
 	// reflect that immediately instead of starting locked/red.
 	bUnlocked = PlayerState.IsValid() && PlayerState->IsIsabelGateUnlocked();
 	RefreshStatusLight();
+	if (bUnlocked)
+	{
+		// Covers reloading into a save where the gate was already unlocked -
+		// she should still be there, not only on the exact unlock moment.
+		SpawnIsabelBossIfNeeded();
+	}
 
 	// Listen for the shared progress delegate too, not just the one-time check
 	// above - this is what makes the "SOTM.ResetIsabelGate" testing console
@@ -117,6 +124,10 @@ void ASOTMKeyGateActor::HandlePlayerStateGateProgressChanged(
 	{
 		bUnlocked = bUnlockedParam;
 		RefreshStatusLight();
+		if (bUnlocked)
+		{
+			SpawnIsabelBossIfNeeded();
+		}
 	}
 	RefreshPrompt();
 }
@@ -279,4 +290,57 @@ void ASOTMKeyGateActor::RefreshStatusLight()
 	}
 	StatusLight->SetLightColor(bUnlocked ? UnlockedLightColor : LockedLightColor);
 	StatusLight->SetIntensity(StatusLightIntensity);
+}
+
+void ASOTMKeyGateActor::SpawnIsabelBossIfNeeded()
+{
+	if (SpawnedIsabelBoss || !IsabelBossClass)
+	{
+		if (!IsabelBossClass)
+		{
+			UE_LOG(LogSOTMKeyGate, Warning, TEXT("SOTMKeyGateActor: gate unlocked but IsabelBossClass is not assigned - set it in the Details panel to BP_Isabel."));
+		}
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FVector SpawnLocation = GetActorLocation();
+	FRotator SpawnRotation = FRotator::ZeroRotator;
+
+	if (IsabelArenaActor)
+	{
+		if (const UBoxComponent* ArenaBox = IsabelArenaActor->FindComponentByClass<UBoxComponent>())
+		{
+			SpawnLocation = ArenaBox->GetComponentLocation();
+			SpawnRotation = ArenaBox->GetComponentRotation();
+		}
+		else
+		{
+			SpawnLocation = IsabelArenaActor->GetActorLocation();
+			SpawnRotation = IsabelArenaActor->GetActorRotation();
+			UE_LOG(LogSOTMKeyGate, Warning, TEXT("SOTMKeyGateActor: IsabelArenaActor has no Box component - spawning at its actor location instead."));
+		}
+	}
+	else
+	{
+		UE_LOG(LogSOTMKeyGate, Warning, TEXT("SOTMKeyGateActor: IsabelArenaActor is not assigned - spawning Isabel at the gate's own location instead."));
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	SpawnedIsabelBoss = World->SpawnActor<APawn>(IsabelBossClass, SpawnLocation, SpawnRotation, SpawnParams);
+	if (SpawnedIsabelBoss)
+	{
+		UE_LOG(LogSOTMKeyGate, Display, TEXT("SOTMKeyGateActor: spawned Isabel boss at (%s)."), *SpawnLocation.ToString());
+	}
+	else
+	{
+		UE_LOG(LogSOTMKeyGate, Warning, TEXT("SOTMKeyGateActor: failed to spawn Isabel boss."));
+	}
 }

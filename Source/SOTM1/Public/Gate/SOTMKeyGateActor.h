@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "SOTMKeyGateActor.generated.h"
 
+class APawn;
 class UBoxComponent;
 class UEnhancedInputComponent;
 class UInputAction;
@@ -80,6 +81,16 @@ public:
 	UFUNCTION(BlueprintPure, Category="Gate")
 	bool IsPlayerInRange() const { return bPlayerInRange; }
 
+	/** Boss pawn class to spawn once the gate is unlocked (assign BP_Isabel here). */
+	UPROPERTY(EditAnywhere, Category="Isabel Boss")
+	TSubclassOf<APawn> IsabelBossClass;
+
+	/** Placed BP_IsabelArena instance in this level - its first UBoxComponent
+	 * (named "Box" in the Blueprint) is used as the boss spawn location. Drag
+	 * the level's Arena actor into this slot in the gate's Details panel. */
+	UPROPERTY(EditInstanceOnly, Category="Isabel Boss")
+	TObjectPtr<AActor> IsabelArenaActor;
+
 private:
 	UFUNCTION()
 	void HandleOverlapBegin(
@@ -108,6 +119,7 @@ private:
 	void HandlePhase4KeyProgressChanged(bool bChestOpened, bool bHasGateKey, bool bGateUnlocked, bool bDemoCompleted);
 	void RefreshPrompt();
 	void RefreshStatusLight();
+	void SpawnIsabelBossIfNeeded();
 
 	TWeakObjectPtr<USOTMPlayerStateSubsystem> PlayerState;
 	TWeakObjectPtr<USOTMObjectiveSubsystem> Objectives;
@@ -120,6 +132,9 @@ private:
 
 	bool bPlayerInRange = false;
 	bool bUnlocked = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<APawn> SpawnedIsabelBoss;
 
 	FTimerHandle BindInputRetryTimer;
 };
