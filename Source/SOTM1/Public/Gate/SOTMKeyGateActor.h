@@ -20,6 +20,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	bool, bVisible,
 	FText, PromptText);
 
+/** Broadcast once, right after SpawnIsabelBossIfNeeded() successfully spawns her. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FSOTMIsabelBossSpawnedSignature,
+	APawn*, SpawnedBoss);
+
 /**
  * Standalone, self-contained key-locked gate. Separate from the Phase 4 demo
  * chest/key/gate system - this is the Mansion Gate that leads to the Isabel
@@ -75,6 +80,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Gate")
 	FSOTMGatePromptChangedSignature OnGatePromptChanged;
 
+	UPROPERTY(BlueprintAssignable, Category="Isabel Boss")
+	FSOTMIsabelBossSpawnedSignature OnIsabelBossSpawned;
+
 	UFUNCTION(BlueprintPure, Category="Gate")
 	bool IsUnlocked() const { return bUnlocked; }
 
@@ -111,6 +119,24 @@ private:
 	void BindInteractInput();
 	void UnbindInteractInput();
 	void HandleInteractInput();
+
+#if !UE_BUILD_SHIPPING
+	// Testing only - F9/F10 keys deal flat debug damage to Isabel, so her health
+	// can be tested without building the real attack-hit logic yet. Routes
+	// through the standard UGameplayStatics::ApplyDamage flow, same as any real
+	// attack would, so it lands on her existing USOTMBossVitalComponent's
+	// Current Health exactly like a real hit - no separate health variable is
+	// used or needed. FindIsabelBossActor() does NOT rely solely on this gate's
+	// own SpawnedIsabelBoss reference (which is null if she was placed in the
+	// level manually, or reached via a fast-travel shortcut that skipped the
+	// real spawn-on-unlock flow) - it falls back to searching the whole world
+	// for any actor carrying a USOTMBossVitalComponent, so the debug keys work
+	// regardless of how she ended up in the level.
+	void HandleDebugDamage20();
+	void HandleDebugDamage50();
+	void ApplyDebugDamageToIsabel(float Damage);
+	AActor* FindIsabelBossActor() const;
+#endif
 
 	UFUNCTION()
 	void HandlePlayerStateGateProgressChanged(bool bReached, bool bHasKey, bool bUnlockedParam);

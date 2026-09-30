@@ -10,6 +10,10 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
+#include "AI/SOTMBossVitalComponent.h"
+#include "EngineUtils.h"
+#include "InputCoreTypes.h"
+#include "Kismet/GameplayStatics.h"
 #include "Objective/SOTMObjectiveSubsystem.h"
 #include "SOTMPlayerStateSubsystem.h"
 #include "TimerManager.h"
@@ -223,6 +227,20 @@ void ASOTMKeyGateActor::BindInteractInput()
 		InteractInputAction, ETriggerEvent::Started, this, &ThisClass::HandleInteractInput);
 	InteractBindingHandle = Binding.GetHandle();
 	BoundEnhancedInput = Input;
+
+#if !UE_BUILD_SHIPPING
+	// Testing only - see header comment. UEnhancedInputComponent explicitly
+	// deletes the legacy BindKey() overload to discourage mixing the two input
+	// systems, but the underlying legacy key-binding support it inherits from
+	// UInputComponent still works fine at runtime - calling through a plain
+	// UInputComponent* pointer (instead of the UEnhancedInputComponent* one)
+	// resolves to the real, usable base-class overload instead of the deleted
+	// derived-class one, so no new Input Action asset is needed for these
+	// throwaway testing keys.
+	UInputComponent* LegacyInput = Input;
+	LegacyInput->BindKey(EKeys::U, IE_Pressed, this, &ThisClass::HandleDebugDamage20);
+	LegacyInput->BindKey(EKeys::X, IE_Pressed, this, &ThisClass::HandleDebugDamage50);
+#endif
 }
 
 void ASOTMKeyGateActor::UnbindInteractInput()
@@ -338,9 +356,87 @@ void ASOTMKeyGateActor::SpawnIsabelBossIfNeeded()
 	if (SpawnedIsabelBoss)
 	{
 		UE_LOG(LogSOTMKeyGate, Display, TEXT("SOTMKeyGateActor: spawned Isabel boss at (%s)."), *SpawnLocation.ToString());
+		OnIsabelBossSpawned.Broadcast(SpawnedIsabelBoss);
 	}
 	else
 	{
 		UE_LOG(LogSOTMKeyGate, Warning, TEXT("SOTMKeyGateActor: failed to spawn Isabel boss."));
 	}
 }
+
+#if !UE_BUILD_SHIPPING
+void ASOTMKeyGateActor::HandleDebugDamage20()
+{
+	UE_LOG(LogSOTMKeyGate, Display, TEXT("Debug damage: U pressed."));
+	ApplyDebugDamageToIsabel(20.0f);
+}
+
+void ASOTMKeyGateActor::HandleDebugDamage50()
+{
+	UE_LOG(LogSOTMKeyGate, Display, TEXT("Debug damage: X pressed."));
+	ApplyDebugDamageToIsabel(50.0f);
+}
+
+AActor* ASOTMKeyGateActor::FindIsabelBossActor() const
+{
+	if (SpawnedIsabelBoss)
+	{
+		return SpawnedIsabelBoss;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	// Prefer matching by her actual pawn class (already assigned in the Details
+	// panel for spawning) - this finds her whether she was spawned by this gate,
+	// placed by hand in the level, or reached via a fast-travel/skip command,
+	// and works even if her health is tracked purely in her own Blueprint rather
+	// than through USOTMBossVitalComponent.
+	if (IsabelBossClass)
+	{
+		for (TActorIterator<APawn> It(World); It; ++It)
+		{
+			if (It->IsA(IsabelBossClass))
+			{
+				return *It;
+			}
+		}
+	}
+
+	// Fallback: any actor carrying the C++ boss health component, in case
+	// IsabelBossClass was never assigned on this gate.
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->FindComponentByClass<USOTMBossVitalComponent>())
+		{
+			return *It;
+		}
+	}
+	return nullptr;
+}
+
+void ASOTMKeyGateActor::ApplyDebugDamageToIsabel(const float Damage)
+{
+	AActor* Target = FindIsabelBossActor();
+	if (!Target)
+	{
+		UE_LOG(LogSOTMKeyGate, Warning, TEXT("Debug damage: could not find Isabel in the level - has she spawned yet, and is IsabelBossClass assigned on this gate?"));
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+
+	if (!Target->FindComponentByClass<USOTMBossVitalComponent>())
+	{
+		UE_LOG(LogSOTMKeyGate, Warning, TEXT("Debug damage: found %s but it has no SOTMBossVitalComponent - damage will still fire an AnyDamage event, but the BossProgressBar needs either that component or ISOTMBossHealthBridgeInterface implemented on it to track health."), *Target->GetName());
+	}
+
+	const float Applied = UGameplayStatics::ApplyDamage(Target, Damage, PC, this, nullptr);
+	UE_LOG(LogSOTMKeyGate, Display, TEXT("Debug damage: applied %.1f to %s (requested %.1f)."),
+		Applied, *Target->GetName(), Damage);
+}
+#endif

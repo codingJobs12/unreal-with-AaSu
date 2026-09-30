@@ -383,6 +383,19 @@ private:
 	// having to walk the whole level each time.
 	void HandleGoToIsabelArenaCommand(const TArray<FString>& Args);
 
+	// Handler for the "SOTM.SkipToGateMission" testing console command (registered/
+	// unregistered in Initialize/Deinitialize) - marks every Chapter 1 objective
+	// before "Reach the Gate" complete (coins, speed boost, lightning throw, chest,
+	// gate key) WITHOUT touching the gate's own reached/unlocked state, so "Reach
+	// the Gate" becomes the live active objective, then teleports the player to
+	// the "IsabelArena"-tagged actor the same way SOTM.GoToIsabelArena does.
+	void HandleSkipToGateMissionCommand(const TArray<FString>& Args);
+
+	// Shared by both commands above - finds the level actor tagged "IsabelArena"
+	// and teleports the player pawn to its Box component. Returns false (and logs
+	// a warning under LogContext) if no arena or no player pawn could be found.
+	bool TeleportPlayerToIsabelArena(const TCHAR* LogContext);
+
 	UPROPERTY(Transient)
 	int32 CurrentLives = 5;
 
@@ -402,6 +415,7 @@ private:
 	IConsoleObject* GiveIsabelGateKeyConsoleCommand = nullptr;
 	IConsoleObject* ResetIsabelGateConsoleCommand = nullptr;
 	IConsoleObject* GoToIsabelArenaConsoleCommand = nullptr;
+	IConsoleObject* SkipToGateMissionConsoleCommand = nullptr;
 
 	UPROPERTY(Transient)
 	bool bSpeedBoostUnlocked = false;

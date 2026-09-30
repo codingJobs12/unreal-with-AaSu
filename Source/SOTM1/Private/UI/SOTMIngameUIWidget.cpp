@@ -1,5 +1,6 @@
 #include "UI/SOTMIngameUIWidget.h"
 
+#include "AI/SOTMBossVitalComponent.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -15,6 +16,8 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
 #include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "Ability/SOTMLightningThrowWorldSubsystem.h"
@@ -270,6 +273,8 @@ void USOTMIngameUIWidget::NativeConstruct()
 	{
 		BoundGateActor->OnGatePromptChanged.RemoveDynamic(this, &ThisClass::HandleGatePromptChanged);
 		BoundGateActor->OnGatePromptChanged.AddDynamic(this, &ThisClass::HandleGatePromptChanged);
+		BoundGateActor->OnIsabelBossSpawned.RemoveDynamic(this, &ThisClass::HandleIsabelBossSpawned);
+		BoundGateActor->OnIsabelBossSpawned.AddDynamic(this, &ThisClass::HandleIsabelBossSpawned);
 	}
 
 #if !UE_BUILD_SHIPPING
@@ -344,6 +349,13 @@ void USOTMIngameUIWidget::NativeDestruct()
 	if (BoundGateActor)
 	{
 		BoundGateActor->OnGatePromptChanged.RemoveDynamic(this, &ThisClass::HandleGatePromptChanged);
+		BoundGateActor->OnIsabelBossSpawned.RemoveDynamic(this, &ThisClass::HandleIsabelBossSpawned);
+	}
+	if (BoundIsabelVital)
+	{
+		BoundIsabelVital->OnHealthChanged.RemoveDynamic(this, &ThisClass::HandleIsabelHealthChanged);
+		BoundIsabelVital->OnDeath.RemoveDynamic(this, &ThisClass::HandleIsabelDeath);
+		BoundIsabelVital = nullptr;
 	}
 	BoundObjectiveState = nullptr;
 	BoundPhase2World = nullptr;
@@ -630,6 +642,52 @@ void USOTMIngameUIWidget::HandleGatePromptChanged(const bool bVisible, const FTe
 		? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 }
 
+void USOTMIngameUIWidget::HandleIsabelBossSpawned(APawn* SpawnedBoss)
+{
+	// Makes the BossPanel visible the moment she spawns, AND binds to her actual
+	// USOTMBossVitalComponent (if present) so the progress bar tracks the same
+	// Current Health the debug damage keys feed into. If she has no such
+	// component (e.g. her health lives in her own Blueprint variable instead),
+	// the panel just starts full - call USOTMUIEffectsLibrary::ReportIsabelBossHealth
+	// from her "Event Any Damage" graph to keep it updated in that setup.
+	if (BoundIsabelVital)
+	{
+		BoundIsabelVital->OnHealthChanged.RemoveDynamic(this, &ThisClass::HandleIsabelHealthChanged);
+		BoundIsabelVital->OnDeath.RemoveDynamic(this, &ThisClass::HandleIsabelDeath);
+		BoundIsabelVital = nullptr;
+	}
+
+	USOTMBossVitalComponent* Vital = SpawnedBoss ? SpawnedBoss->FindComponentByClass<USOTMBossVitalComponent>() : nullptr;
+	const float InitialHealth = Vital ? Vital->GetHealthNormalized() : 1.0f;
+	SetBossProgress(NSLOCTEXT("SOTM", "IsabelBossName", "ISABELLA"), InitialHealth);
+
+	if (Vital)
+	{
+		Vital->OnHealthChanged.RemoveDynamic(this, &ThisClass::HandleIsabelHealthChanged);
+		Vital->OnHealthChanged.AddDynamic(this, &ThisClass::HandleIsabelHealthChanged);
+		Vital->OnDeath.RemoveDynamic(this, &ThisClass::HandleIsabelDeath);
+		Vital->OnDeath.AddDynamic(this, &ThisClass::HandleIsabelDeath);
+		BoundIsabelVital = Vital;
+	}
+}
+
+void USOTMIngameUIWidget::HandleIsabelHealthChanged(
+	USOTMBossVitalComponent* VitalComponent, const float PreviousHealth, const float CurrentHealth, const float MaximumHealth)
+{
+	(void)VitalComponent;
+	(void)PreviousHealth;
+	SetBossProgress(NSLOCTEXT("SOTM", "IsabelBossName", "ISABELLA"),
+		MaximumHealth > 0.0f ? CurrentHealth / MaximumHealth : 0.0f);
+}
+
+void USOTMIngameUIWidget::HandleIsabelDeath(USOTMBossVitalComponent* VitalComponent, AController* InstigatedBy, AActor* DamageCauser)
+{
+	(void)VitalComponent;
+	(void)InstigatedBy;
+	(void)DamageCauser;
+	ClearBossProgress();
+}
+
 void USOTMIngameUIWidget::HandlePhase4Notification(const FText Title, const FText Detail)
 {
 	if (!Phase4NotificationPanel || !Phase4NotificationTitle || !Phase4NotificationDetail)
@@ -871,6 +929,13 @@ void USOTMIngameUIWidget::SetBossProgress(const FText& BossName, const float Nor
 {
 	if (!BossPanel || !BossNameText || !BossProgressBar)
 	{
+		UE_LOG(LogSOTMHUD, Warning, TEXT(
+			"SetBossProgress on %s: bailing out, one or more bound widgets are null (BossPanel=%s BossNameText=%s BossProgressBar=%s) - "
+			"check these BindWidget variable names in the UMG Designer match exactly."),
+			*GetName(),
+			BossPanel ? TEXT("ok") : TEXT("NULL"),
+			BossNameText ? TEXT("ok") : TEXT("NULL"),
+			BossProgressBar ? TEXT("ok") : TEXT("NULL"));
 		return;
 	}
 	BossNameText->SetText(FText::Format(
@@ -878,6 +943,8 @@ void USOTMIngameUIWidget::SetBossProgress(const FText& BossName, const float Nor
 	BossProgressBar->SetPercent(FMath::Clamp(NormalizedHealth, 0.0f, 1.0f));
 	BossPanel->SetVisibility(
 		BossName.IsEmptyOrWhitespace() ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+	UE_LOG(LogSOTMHUD, Display, TEXT("SetBossProgress on %s: applied, Percent=%.2f, BossPanel visibility=%d."),
+		*GetName(), FMath::Clamp(NormalizedHealth, 0.0f, 1.0f), static_cast<int32>(BossPanel->GetVisibility()));
 }
 
 void USOTMIngameUIWidget::ClearBossProgress()

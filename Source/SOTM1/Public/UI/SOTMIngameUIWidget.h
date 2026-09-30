@@ -8,6 +8,9 @@
 #include "SOTMPlayerStateSubsystem.h"
 #include "SOTMIngameUIWidget.generated.h"
 
+class AController;
+class APawn;
+class USOTMBossVitalComponent;
 class UBorder;
 class UProgressBar;
 class UTextBlock;
@@ -124,6 +127,15 @@ private:
 
 	UFUNCTION()
 	void HandleGatePromptChanged(bool bVisible, FText PromptText);
+
+	UFUNCTION()
+	void HandleIsabelBossSpawned(APawn* SpawnedBoss);
+
+	UFUNCTION()
+	void HandleIsabelHealthChanged(USOTMBossVitalComponent* VitalComponent, float PreviousHealth, float CurrentHealth, float MaximumHealth);
+
+	UFUNCTION()
+	void HandleIsabelDeath(USOTMBossVitalComponent* VitalComponent, AController* InstigatedBy, AActor* DamageCauser);
 
 	UFUNCTION()
 	void HandlePhase4Notification(FText Title, FText Detail);
@@ -287,6 +299,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<ASOTMKeyGateActor> BoundGateActor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USOTMBossVitalComponent> BoundIsabelVital;
 
 	FTimerHandle CoinPulseTimerHandle;
 	FTimerHandle LivesPulseTimerHandle;

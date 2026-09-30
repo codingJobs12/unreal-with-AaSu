@@ -14,6 +14,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Ability/SOTMLightningThrowSettings.h"
+#include "Objective/SOTMObjectiveSubsystem.h"
 #include "Ability/SOTMPhase3Settings.h"
 #include "Ability/SOTMSkillTreeSettings.h"
 #include "SOTMGameOverWidget.h"
@@ -221,6 +222,12 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		TEXT("Testing only: teleports the player near the level's actor tagged 'IsabelArena', e.g. 'SOTM.GoToIsabelArena'."),
 		FConsoleCommandWithArgsDelegate::CreateUObject(
 			this, &USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand));
+
+	SkipToGateMissionConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("SOTM.SkipToGateMission"),
+		TEXT("Testing only: completes every objective before 'Reach the Gate' and teleports the player to the Isabel arena, e.g. 'SOTM.SkipToGateMission'."),
+		FConsoleCommandWithArgsDelegate::CreateUObject(
+			this, &USOTMPlayerStateSubsystem::HandleSkipToGateMissionCommand));
 }
 
 void USOTMPlayerStateSubsystem::Deinitialize()
@@ -245,6 +252,11 @@ void USOTMPlayerStateSubsystem::Deinitialize()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GoToIsabelArenaConsoleCommand);
 		GoToIsabelArenaConsoleCommand = nullptr;
+	}
+	if (SkipToGateMissionConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(SkipToGateMissionConsoleCommand);
+		SkipToGateMissionConsoleCommand = nullptr;
 	}
 
 	if (UWorld* World = GetWorld())
@@ -639,17 +651,67 @@ void USOTMPlayerStateSubsystem::HandleResetIsabelGateCommand(const TArray<FStrin
 
 void USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand(const TArray<FString>& Args)
 {
-	// Testing convenience only - finds the level actor tagged "IsabelArena" (add
-	// that tag to BP_IsabelArena's Actor > Tags in the level) and teleports the
-	// player pawn to its Box component, so you don't have to walk the level each
-	// time to test the boss fight.
+	(void)Args;
+	TeleportPlayerToIsabelArena(TEXT("SOTM.GoToIsabelArena"));
+}
+
+void USOTMPlayerStateSubsystem::HandleSkipToGateMissionCommand(const TArray<FString>& Args)
+{
+	// Testing convenience only - skips straight past every earlier Chapter 1
+	// objective (coins, speed boost, lightning throw, chest, gate key) by setting
+	// their underlying flags directly, bypassing the normal coin-cost purchase
+	// flow entirely. Deliberately leaves bIsabelGateReached/bIsabelGateUnlocked
+	// untouched so "Reach the Gate" is left as the live, incomplete objective for
+	// you to actually walk up and trigger yourself.
 	(void)Args;
 
+	const int32 PreviousLifetimeCoins = LifetimeCoinsCollected;
+	const bool bPreviousSpeedBoost = bSpeedBoostUnlocked;
+	const int32 PreviousSpeedBoostLevel = SpeedBoostLevel;
+	const bool bPreviousLightningThrow = bLightningThrowUnlocked;
+	const bool bPreviousChestOpened = bPhase4ChestOpened;
+	const bool bPreviousHasGateKey = bPhase4HasGateKey;
+
+	LifetimeCoinsCollected = FMath::Max(LifetimeCoinsCollected, USOTMObjectiveSubsystem::TotalForestCoins);
+	bSpeedBoostUnlocked = true;
+	SpeedBoostLevel = FMath::Max(SpeedBoostLevel, 1);
+	bLightningThrowUnlocked = true;
+	bPhase4ChestOpened = true;
+	bPhase4HasGateKey = true;
+
+	if (!SavePlayerStateInternal(TEXT("SkipToGateMission")))
+	{
+		LifetimeCoinsCollected = PreviousLifetimeCoins;
+		bSpeedBoostUnlocked = bPreviousSpeedBoost;
+		SpeedBoostLevel = PreviousSpeedBoostLevel;
+		bLightningThrowUnlocked = bPreviousLightningThrow;
+		bPhase4ChestOpened = bPreviousChestOpened;
+		bPhase4HasGateKey = bPreviousHasGateKey;
+		UE_LOG(LogTemp, Warning, TEXT("SOTM.SkipToGateMission: save failed, no changes applied."));
+		return;
+	}
+
+	OnCoinsChanged.Broadcast(AvailableCoins, LifetimeCoinsCollected);
+	OnSpeedBoostOwnershipChanged.Broadcast(bSpeedBoostUnlocked, SpeedBoostLevel);
+	OnLightningThrowOwnershipChanged.Broadcast(bLightningThrowUnlocked);
+	OnPhase4ProgressChanged.Broadcast(bPhase4ChestOpened, bPhase4HasGateKey, bPhase4GateUnlocked, bPhase4DemoCompleted);
+
+	UE_LOG(LogTemp, Display, TEXT("SOTM.SkipToGateMission: earlier objectives completed, key granted, gate left for you to reach."));
+
+	TeleportPlayerToIsabelArena(TEXT("SOTM.SkipToGateMission"));
+}
+
+bool USOTMPlayerStateSubsystem::TeleportPlayerToIsabelArena(const TCHAR* LogContext)
+{
+	// Finds the level actor tagged "IsabelArena" (add that tag to BP_IsabelArena's
+	// Actor > Tags in the level) and teleports the player pawn to its Box
+	// component, so you don't have to walk the level each time to test the boss
+	// fight. Shared by SOTM.GoToIsabelArena and SOTM.SkipToGateMission.
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no World available."));
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("%s: no World available."), LogContext);
+		return false;
 	}
 
 	static const FName IsabelArenaTag(TEXT("IsabelArena"));
@@ -657,8 +719,8 @@ void USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand(const TArray<FStrin
 	UGameplayStatics::GetAllActorsWithTag(World, IsabelArenaTag, ArenaActors);
 	if (ArenaActors.Num() == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no actor tagged 'IsabelArena' found - add that tag to BP_IsabelArena's Actor > Tags in the level."));
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("%s: no actor tagged 'IsabelArena' found - add that tag to BP_IsabelArena's Actor > Tags in the level."), LogContext);
+		return false;
 	}
 
 	const AActor* Arena = ArenaActors[0];
@@ -679,12 +741,13 @@ void USOTMPlayerStateSubsystem::HandleGoToIsabelArenaCommand(const TArray<FStrin
 	}
 	if (!PlayerActor)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SOTM.GoToIsabelArena: no player pawn found."));
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("%s: no player pawn found."), LogContext);
+		return false;
 	}
 
 	PlayerActor->SetActorLocation(TargetLocation, false, nullptr, ETeleportType::TeleportPhysics);
-	UE_LOG(LogTemp, Display, TEXT("SOTM.GoToIsabelArena: teleported player to (%s)."), *TargetLocation.ToString());
+	UE_LOG(LogTemp, Display, TEXT("%s: teleported player to (%s)."), LogContext, *TargetLocation.ToString());
+	return true;
 }
 
 bool USOTMPlayerStateSubsystem::CommitIsabelGateReached()
