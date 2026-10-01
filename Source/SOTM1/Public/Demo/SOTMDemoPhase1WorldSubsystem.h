@@ -44,11 +44,18 @@ private:
 	void PlayIntroDialogueStep();
 	void AdvanceIntroDialogue();
 	void PlayTemporaryDialogue(const TCHAR* SoundPath, const FText& Speaker, const FText& Line);
+	// Same as PlayTemporaryDialogue, but shows Part1 for roughly the first half of the
+	// VO's duration, then swaps to Part2 for the remainder - used for Timmy's lengthy
+	// opening line only, so it reads as two beats instead of one wall of text.
+	void PlayTemporaryDialogueTwoPart(const TCHAR* SoundPath, const FText& Speaker, const FText& Part1, const FText& Part2);
+	void SwitchToSubtitlePart2();
 
 	UFUNCTION()
 	void HandleTemporaryDialogueFinished();
 
-	void SetSubtitle(const FText& Speaker, const FText& Line);
+	void SetSubtitle(const FText& Speaker, const FText& Line, float TargetDuration = 0.0f);
+	void StartSubtitleTypewriter(const FText& Line, float TargetDuration);
+	void TickSubtitleTypewriter();
 	void FrameActorWithCinematicCamera(AActor* Subject);
 	void CreateSubtitleOverlay();
 	void RemoveSubtitleOverlay();
@@ -82,6 +89,13 @@ private:
 	TSharedPtr<class SWidget> SubtitleViewportRoot;
 	TSharedPtr<class STextBlock> SubtitleSpeakerText;
 	TSharedPtr<class STextBlock> SubtitleLineText;
+	FTimerHandle SubtitleTypewriterTimer;
+	FString SubtitleFullLine;
+	int32 SubtitleRevealedChars = 0;
+	float SubtitleTypewriterInterval = 0.045f;
+	FTimerHandle SubtitlePart2Timer;
+	FText PendingSubtitlePart2;
+	float PendingSubtitlePart2Duration = 0.0f;
 	int32 IntroDialogueStep = 0;
 	bool bIntroRequested = false;
 	bool bCinematicLockHeld = false;

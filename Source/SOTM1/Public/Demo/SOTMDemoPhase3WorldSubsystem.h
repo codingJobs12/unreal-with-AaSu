@@ -156,4 +156,47 @@ private:
 	FTimerHandle ActiveTimer;
 	FTimerHandle CooldownTimer;
 	FTimerHandle PresentationTimer;
+
+	// Mini scripted "beat" played the moment an upgrade (Speed Boost / Lightning
+	// Throw) is unlocked: hides the gameplay HUD, switches to UI-only input (so
+	// the player can't act mid-line), waits a short beat, then shows a raw-Slate
+	// subtitle synced to that line's VO duration (falls back to a fixed timer if
+	// the VO asset is missing), and restores everything once the line ends.
+	void BeginUpgradeUnlockDialogue(const TCHAR* VOPath, const FText& Speaker, const FText& Line);
+	void HideGameplayUIForDialogue();
+	void PlayPendingUpgradeDialogueLine();
+	void EndUpgradeUnlockDialogue();
+
+	UFUNCTION()
+	void HandleUpgradeDialogueAudioFinished();
+
+	// Reveals UpgradeDialogueFullLine into UpgradeDialogueLineText one character
+	// at a time (typewriter effect), paced so it finishes roughly with the VO.
+	void StartUpgradeDialogueTypewriter(float TargetDuration);
+	void TickUpgradeDialogueTypewriter();
+
+	TSharedPtr<class SWidget> UpgradeDialogueSubtitleRoot;
+	TSharedPtr<class STextBlock> UpgradeDialogueSpeakerText;
+	TSharedPtr<class STextBlock> UpgradeDialogueLineText;
+	FTimerHandle UpgradeDialoguePreDelayTimer;
+	FTimerHandle UpgradeDialogueTimeoutTimer;
+	FTimerHandle UpgradeDialogueTypewriterTimer;
+	FString UpgradeDialogueFullLine;
+	int32 UpgradeDialogueRevealedChars = 0;
+	float UpgradeDialogueTypewriterInterval = 0.045f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> UpgradeDialogueAudio;
+
+	// Pending line, set by BeginUpgradeUnlockDialogue and consumed by
+	// PlayPendingUpgradeDialogueLine once the pre-delay elapses.
+	const TCHAR* PendingDialogueVOPath = nullptr;
+	FText PendingDialogueSpeaker;
+	FText PendingDialogueLine;
+
+	// Gameplay HUD widgets hidden for the duration of the dialogue, with their
+	// original visibility so they can be restored exactly as they were.
+	TMap<TWeakObjectPtr<class UUserWidget>, ESlateVisibility> HiddenGameplayUIWidgets;
+	bool bUpgradeDialogueInputLockHeld = false;
+	bool bPreviousMouseCursorUpgradeDialogue = false;
 };

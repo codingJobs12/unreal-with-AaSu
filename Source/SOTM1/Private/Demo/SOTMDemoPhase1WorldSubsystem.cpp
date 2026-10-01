@@ -234,11 +234,12 @@ void USOTMDemoPhase1WorldSubsystem::BeginMansionIntro(APlayerController* PC, USO
 	IsabelActor = SOTMDemoPhase1Private::FindActor(World, TEXT("Isabel_Phase1"));
 	CinematicCameraActor = SOTMDemoPhase1Private::FindActor(World, TEXT("SequenceCamera"));
 	if (AActor* Timmy = TimmyActor.Get()) Timmy->SetActorHiddenInGame(false);
+	// Isabel's visibility and animation are authored directly in the intro Level
+	// Sequence now - this subsystem only stops her legacy Blueprint AI logic (tick /
+	// timers / movement) so it cannot fight whatever the sequence is doing to her.
 	if (AActor* Isabel = IsabelActor.Get())
 	{
 		StopIsabelGameplayLogic(Isabel);
-		Isabel->SetActorHiddenInGame(true);
-		Isabel->SetActorEnableCollision(false);
 	}
 	CreateSubtitleOverlay();
 	if (ULevelSequence* Sequence = LoadObject<ULevelSequence>(nullptr, SOTMDemoPhase1Private::IntroSequence))
@@ -289,20 +290,12 @@ void USOTMDemoPhase1WorldSubsystem::PresentTimmyDanger()
 
 void USOTMDemoPhase1WorldSubsystem::PresentIsabelArrival()
 {
+	// Visibility and animation are driven entirely by the Level Sequence now - this
+	// beat only moves the (manual, non-Sequencer) camera to frame Isabel for whichever
+	// non-sequence shots still use it.
 	AActor* Isabel = IsabelActor.Get();
 	if (!Isabel) return;
-	Isabel->SetActorHiddenInGame(false);
 	FrameActorWithCinematicCamera(Isabel);
-	if (USkeletalMeshComponent* Mesh = Isabel->FindComponentByClass<USkeletalMeshComponent>())
-	{
-		if (UAnimInstance* Anim = Mesh->GetAnimInstance())
-		{
-			if (UAnimMontage* Montage = LoadObject<UAnimMontage>(nullptr, SOTMDemoPhase1Private::IsabelMontage))
-			{
-				Anim->Montage_Play(Montage);
-			}
-		}
-	}
 }
 
 void USOTMDemoPhase1WorldSubsystem::PresentKnockout()
@@ -363,19 +356,22 @@ void USOTMDemoPhase1WorldSubsystem::PlayIntroDialogueStep()
 	switch (IntroDialogueStep)
 	{
 	case 0:
-		PresentTimmyOpening();
-		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion001,
-			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+		PlayTemporaryDialogueTwoPart(SOTMDemoPhase1Private::TimmyMansion001,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyIntro1Part1",
+				"Hi I’m Timmy Bottom smith it’s nice to meet you mage I’m so glad you came. Listen if you want your powers back you need to go that forest and get it."),
+			NSLOCTEXT("SOTM", "TimmyIntro1Part2",
+				"She’s been waiting for you. Isabella. She took everything from you… even your powers and there’s only one way back good luck."));
 		break;
 	case 1:
-		PresentTimmyWarning();
 		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion002,
-			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyIntro2", "But listen… you can get them back. Just not in here."));
 		break;
 	case 2:
-		PresentTimmyDanger();
 		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyMansion003,
-			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), SubtitleLineText ? SubtitleLineText->GetText() : FText::GetEmpty());
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyWarning", "Oh no… she’s coming—"));
 		break;
 	case 3:
 		PresentIsabelArrival();
@@ -433,8 +429,9 @@ void USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogue(
 	const FText& Speaker,
 	const FText& Line)
 {
-	SetSubtitle(Speaker, Line);
 	USoundBase* Dialogue = LoadObject<USoundBase>(nullptr, SoundPath);
+	const float VODuration = Dialogue ? Dialogue->GetDuration() : 0.0f;
+	SetSubtitle(Speaker, Line, VODuration);
 	if (MansionAmbienceAudio)
 	{
 		MansionAmbienceAudio->SetVolumeMultiplier(0.035f);
@@ -448,7 +445,7 @@ void USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogue(
 	{
 		ActiveDialogueAudio->OnAudioFinished.AddUniqueDynamic(this, &ThisClass::HandleTemporaryDialogueFinished);
 		UE_LOG(LogTemp, Display, TEXT("SOTM TEMPORARY PLACEHOLDER VO: playing %s duration=%.2fs subtitle=%s"),
-			SoundPath, Dialogue->GetDuration(), *Line.ToString());
+			SoundPath, VODuration, *Line.ToString());
 		return;
 	}
 
@@ -459,6 +456,66 @@ void USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogue(
 		World->GetTimerManager().SetTimer(
 			DialogueAdvanceTimer, this, &ThisClass::AdvanceIntroDialogue, FallbackDelay, false);
 	}
+}
+
+void USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogueTwoPart(
+	const TCHAR* SoundPath, const FText& Speaker, const FText& Part1, const FText& Part2)
+{
+	UWorld* World = GetWorld();
+	USoundBase* Dialogue = LoadObject<USoundBase>(nullptr, SoundPath);
+	const float VODuration = Dialogue ? Dialogue->GetDuration() : 0.0f;
+
+	// Split the VO time between the two halves proportionally to how long each half's
+	// text is, so the swap lands roughly where the voice reaches the line's midpoint
+	// instead of always at a flat 50%.
+	const int32 Part1Len = Part1.ToString().Len();
+	const int32 Part2Len = Part2.ToString().Len();
+	const float SplitRatio = (Part1Len + Part2Len) > 0
+		? static_cast<float>(Part1Len) / static_cast<float>(Part1Len + Part2Len)
+		: 0.5f;
+	const float Part1Duration = VODuration > 0.0f ? VODuration * SplitRatio : 0.0f;
+
+	PendingSubtitlePart2 = Part2;
+	PendingSubtitlePart2Duration = VODuration > 0.0f ? FMath::Max(VODuration - Part1Duration, 0.3f) : 2.0f;
+	SetSubtitle(Speaker, Part1, Part1Duration);
+
+	if (World)
+	{
+		World->GetTimerManager().SetTimer(
+			SubtitlePart2Timer, this, &ThisClass::SwitchToSubtitlePart2,
+			Part1Duration > 0.0f ? Part1Duration : 2.0f, false);
+	}
+
+	if (MansionAmbienceAudio)
+	{
+		MansionAmbienceAudio->SetVolumeMultiplier(0.035f);
+	}
+	if (Dialogue)
+	{
+		ActiveDialogueAudio = UGameplayStatics::SpawnSound2D(
+			this, Dialogue, 1.0f, 1.0f, 0.0f, nullptr, false, true);
+	}
+	if (ActiveDialogueAudio)
+	{
+		ActiveDialogueAudio->OnAudioFinished.AddUniqueDynamic(this, &ThisClass::HandleTemporaryDialogueFinished);
+		UE_LOG(LogTemp, Display,
+			TEXT("SOTM TEMPORARY PLACEHOLDER VO (two-part subtitle): playing %s duration=%.2fs part1=%.2fs part2=%.2fs"),
+			SoundPath, VODuration, Part1Duration, PendingSubtitlePart2Duration);
+		return;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("SOTM TEMPORARY PLACEHOLDER VO unavailable: %s"), SoundPath);
+	if (World)
+	{
+		World->GetTimerManager().SetTimer(DialogueAdvanceTimer, this, &ThisClass::AdvanceIntroDialogue, 4.5f, false);
+	}
+}
+
+void USOTMDemoPhase1WorldSubsystem::SwitchToSubtitlePart2()
+{
+	const FText Speaker = SubtitleSpeakerText.IsValid() ? SubtitleSpeakerText->GetText() : FText::GetEmpty();
+	SetSubtitle(Speaker, PendingSubtitlePart2, PendingSubtitlePart2Duration);
+	PendingSubtitlePart2 = FText::GetEmpty();
 }
 
 void USOTMDemoPhase1WorldSubsystem::HandleTemporaryDialogueFinished()
@@ -482,10 +539,63 @@ void USOTMDemoPhase1WorldSubsystem::TravelToForest()
 	UGameplayStatics::OpenLevel(this, SOTMDemoPhase1Private::ForestMap);
 }
 
-void USOTMDemoPhase1WorldSubsystem::SetSubtitle(const FText& Speaker, const FText& Line)
+void USOTMDemoPhase1WorldSubsystem::SetSubtitle(const FText& Speaker, const FText& Line, const float TargetDuration)
 {
 	if (SubtitleSpeakerText) SubtitleSpeakerText->SetText(Speaker);
-	if (SubtitleLineText) SubtitleLineText->SetText(Line);
+	StartSubtitleTypewriter(Line, TargetDuration);
+}
+
+void USOTMDemoPhase1WorldSubsystem::StartSubtitleTypewriter(const FText& Line, const float TargetDuration)
+{
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(SubtitleTypewriterTimer);
+	}
+	SubtitleFullLine = Line.ToString();
+	SubtitleRevealedChars = 0;
+	if (SubtitleLineText)
+	{
+		SubtitleLineText->SetText(FText::GetEmpty());
+	}
+
+	if (!World || !SubtitleLineText.IsValid() || SubtitleFullLine.IsEmpty())
+	{
+		return;
+	}
+
+	// Pace the reveal so the full line finishes roughly alongside the VO (leaving a
+	// little breathing room at the end), falling back to a snappy fixed cadence when
+	// no VO duration is known (e.g. the scripted zero-audio presentation beats).
+	const int32 CharCount = SubtitleFullLine.Len();
+	const float PacedInterval = TargetDuration > 0.0f ? (TargetDuration * 0.85f) / FMath::Max(CharCount, 1) : 0.045f;
+	SubtitleTypewriterInterval = FMath::Clamp(PacedInterval, 0.015f, 0.06f);
+
+	World->GetTimerManager().SetTimer(
+		SubtitleTypewriterTimer, this, &ThisClass::TickSubtitleTypewriter, SubtitleTypewriterInterval, true);
+}
+
+void USOTMDemoPhase1WorldSubsystem::TickSubtitleTypewriter()
+{
+	if (!SubtitleLineText.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(SubtitleTypewriterTimer);
+		}
+		return;
+	}
+
+	++SubtitleRevealedChars;
+	SubtitleLineText->SetText(FText::FromString(SubtitleFullLine.Left(SubtitleRevealedChars)));
+
+	if (SubtitleRevealedChars >= SubtitleFullLine.Len())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(SubtitleTypewriterTimer);
+		}
+	}
 }
 
 void USOTMDemoPhase1WorldSubsystem::FrameActorWithCinematicCamera(AActor* Subject)
@@ -539,6 +649,14 @@ void USOTMDemoPhase1WorldSubsystem::CreateSubtitleOverlay()
 
 void USOTMDemoPhase1WorldSubsystem::RemoveSubtitleOverlay()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SubtitleTypewriterTimer);
+		World->GetTimerManager().ClearTimer(SubtitlePart2Timer);
+	}
+	SubtitleFullLine.Empty();
+	SubtitleRevealedChars = 0;
+	PendingSubtitlePart2 = FText::GetEmpty();
 	if (SubtitleViewportRoot.IsValid())
 	{
 		if (UGameViewportClient* Viewport = IntroGameViewport.Get())

@@ -26,8 +26,15 @@
 #include "SOTMPlayerVitalComponent.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 #include "UI/SOTMUpgradeStationWidget.h"
 #include "UI/SOTMSkillTreeWidget.h"
+#include "UI/SOTMIngameUIWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Blueprint/UserWidget.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -45,6 +52,8 @@ namespace SOTMPhase3Private
 	const TCHAR* DeniedSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_Denied.SFX_TEMP_Denied");
 	const TCHAR* UpgradeSuccessSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_UpgradeSuccess.SFX_TEMP_UpgradeSuccess");
 	const TCHAR* BoostSound = TEXT("/Game/SuperPowers/Powers/Speedster/SFX/Cue/WindGust_Cue.WindGust_Cue");
+	const TCHAR* TimmySpeedBoostUnlockVO = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Upgrade_001.VO_TEMP_Timmy_Upgrade_001");
+	const TCHAR* TimmyLightningThrowUnlockVO = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Upgrade_002.VO_TEMP_Timmy_Upgrade_002");
 
 	FName NormalizeMapPackageName(const UWorld* World)
 	{
@@ -84,6 +93,7 @@ void USOTMDemoPhase3WorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void USOTMDemoPhase3WorldSubsystem::Deinitialize()
 {
+	EndUpgradeUnlockDialogue();
 	if (ActiveBoostAudio)
 	{
 		ActiveBoostAudio->Stop();
@@ -778,6 +788,11 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 		{
 			UGameplayStatics::PlaySound2D(this, Sound, 0.62f);
 		}
+		BeginUpgradeUnlockDialogue(
+			SOTMPhase3Private::TimmySpeedBoostUnlockVO,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmySpeedBoostUnlocked",
+				"Okay… I’ve restored your speed boost. But use it wisely. You get tired after a while."));
 	}
 	else if (Result != ESOTMSpeedBoostPurchaseResult::AlreadyOwned)
 	{
@@ -788,6 +803,307 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost purchase result=%d"), static_cast<int32>(Result));
 	return Result;
+}
+
+void USOTMDemoPhase3WorldSubsystem::BeginUpgradeUnlockDialogue(
+	const TCHAR* VOPath, const FText& Speaker, const FText& Line)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Re-triggering while a previous line is still showing just restarts it clean
+	// instead of stacking overlays/locks.
+	EndUpgradeUnlockDialogue();
+
+	PendingDialogueVOPath = VOPath;
+	PendingDialogueSpeaker = Speaker;
+	PendingDialogueLine = Line;
+
+	HideGameplayUIForDialogue();
+
+	// Small beat so the HUD has visibly cleared before the line starts, rather
+	// than the subtitle popping in on the exact same frame as the HUD vanishing.
+	World->GetTimerManager().SetTimer(
+		UpgradeDialoguePreDelayTimer, this, &ThisClass::PlayPendingUpgradeDialogueLine, 0.3f, false);
+}
+
+void USOTMDemoPhase3WorldSubsystem::HideGameplayUIForDialogue()
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	if (!PC)
+	{
+		return;
+	}
+
+	// Hide every gameplay HUD instance currently in the viewport (there can be more
+	// than one live at once - see ReportIsabelBossHealth's note on that), remembering
+	// each one's actual visibility so it comes back exactly as it was.
+	HiddenGameplayUIWidgets.Reset();
+	TArray<UUserWidget*> FoundWidgets;
+	// Cast the net over every UMG widget in the viewport, not just the known HUD
+	// class - the project has more than one HUD Blueprint alive at once (see
+	// ReportIsabelBossHealth's note on that), plus separate ability-icon / crosshair
+	// / minimap widgets that are not USOTMIngameUIWidget subclasses at all. The
+	// subtitle itself is raw Slate added straight to the viewport (not a UUserWidget),
+	// so sweeping every UUserWidget here cannot accidentally hide it.
+	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, FoundWidgets, UUserWidget::StaticClass(), false);
+	for (UUserWidget* Widget : FoundWidgets)
+	{
+		if (!Widget)
+		{
+			continue;
+		}
+		const ESlateVisibility CurrentVisibility = Widget->GetVisibility();
+		if (CurrentVisibility == ESlateVisibility::Collapsed || CurrentVisibility == ESlateVisibility::Hidden)
+		{
+			continue;
+		}
+		HiddenGameplayUIWidgets.Add(Widget, CurrentVisibility);
+		Widget->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	bPreviousMouseCursorUpgradeDialogue = PC->bShowMouseCursor;
+	PC->bShowMouseCursor = false;
+	FInputModeUIOnly InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PC->SetInputMode(InputMode);
+	if (PlayerState)
+	{
+		// Cinematic (not Custom) - USOTMIngameUIWidget::HandleInputLocksChanged and
+		// USOTMPlayerHealthBarWidget::HandleInputLocksChanged both already auto-collapse
+		// themselves whenever this reason is active (same as the Mansion intro cutscene),
+		// which is a far more reliable way to hide the HUD than fighting their own
+		// per-tick RefreshPresentationVisibility() with an external SetVisibility call.
+		PlayerState->AcquireInputLock(ESOTMInputLockReason::Cinematic);
+		bUpgradeDialogueInputLockHeld = true;
+	}
+}
+
+void USOTMDemoPhase3WorldSubsystem::PlayPendingUpgradeDialogueLine()
+{
+	UWorld* World = GetWorld();
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr;
+	if (!Viewport)
+	{
+		EndUpgradeUnlockDialogue();
+		return;
+	}
+
+	TSharedRef<SWidget> Content =
+		SNew(SOverlay)
+		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Bottom)
+		.Padding(FMargin(80.0f, 40.0f, 80.0f, 160.0f))
+		[
+			SNew(SBorder)
+			.BorderBackgroundColor(FLinearColor(0.01f, 0.01f, 0.015f, 0.82f))
+			.Padding(FMargin(28.0f, 16.0f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+				[
+					SAssignNew(UpgradeDialogueSpeakerText, STextBlock)
+					.Text(PendingDialogueSpeaker)
+					.ColorAndOpacity(FLinearColor(0.72f, 0.16f, 0.88f, 1.0f))
+				]
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 6.0f, 0.0f, 0.0f)
+				[
+					SAssignNew(UpgradeDialogueLineText, STextBlock)
+					.Text(FText::GetEmpty())
+					.ColorAndOpacity(FLinearColor::White)
+					.WrapTextAt(900.0f)
+					.Justification(ETextJustify::Center)
+				]
+			]
+		];
+
+	UpgradeDialogueSubtitleRoot = Content;
+	Viewport->AddViewportWidgetContent(UpgradeDialogueSubtitleRoot.ToSharedRef(), 950);
+
+	// Subtitle is paced off the VO line's own audio duration (same pattern as
+	// USOTMDemoPhase1WorldSubsystem::PlayTemporaryDialogue) - falls back to a fixed
+	// reading-time estimate only if the VO asset is missing, so it's never stuck up forever.
+	float VODuration = 0.0f;
+	if (USoundBase* VO = LoadObject<USoundBase>(nullptr, PendingDialogueVOPath))
+	{
+		VODuration = VO->GetDuration();
+		UpgradeDialogueAudio = UGameplayStatics::SpawnSound2D(this, VO, 1.0f, 1.0f, 0.0f, nullptr, false, true);
+	}
+	if (UpgradeDialogueAudio)
+	{
+		UpgradeDialogueAudio->OnAudioFinished.AddUniqueDynamic(this, &ThisClass::HandleUpgradeDialogueAudioFinished);
+		UE_LOG(LogSOTMPhase3, Display, TEXT("Upgrade unlock VO: playing %s duration=%.2fs"),
+			PendingDialogueVOPath, VODuration);
+		// Safety net in case OnAudioFinished never fires (e.g. audio device issue).
+		World->GetTimerManager().SetTimer(
+			UpgradeDialogueTimeoutTimer, this, &ThisClass::EndUpgradeUnlockDialogue, VODuration + 1.0f, false);
+		StartUpgradeDialogueTypewriter(VODuration);
+		return;
+	}
+
+	UE_LOG(LogSOTMPhase3, Warning, TEXT("Upgrade unlock VO unavailable (%s) - falling back to timed subtitle."),
+		PendingDialogueVOPath);
+	World->GetTimerManager().SetTimer(
+		UpgradeDialogueTimeoutTimer, this, &ThisClass::EndUpgradeUnlockDialogue, 4.5f, false);
+	StartUpgradeDialogueTypewriter(4.0f);
+}
+
+void USOTMDemoPhase3WorldSubsystem::StartUpgradeDialogueTypewriter(const float TargetDuration)
+{
+	UWorld* World = GetWorld();
+	if (!World || !UpgradeDialogueLineText.IsValid())
+	{
+		return;
+	}
+
+	UpgradeDialogueFullLine = PendingDialogueLine.ToString();
+	UpgradeDialogueRevealedChars = 0;
+	UpgradeDialogueLineText->SetText(FText::GetEmpty());
+
+	if (UpgradeDialogueFullLine.IsEmpty())
+	{
+		return;
+	}
+
+	// Pace the reveal so the full line finishes roughly alongside the VO (leaving a
+	// little breathing room at the end), falling back to a snappy fixed cadence if the
+	// line is long enough that pacing it to a very short clip would look instant.
+	const int32 CharCount = UpgradeDialogueFullLine.Len();
+	const float PacedInterval = TargetDuration > 0.0f ? (TargetDuration * 0.85f) / FMath::Max(CharCount, 1) : 0.045f;
+	UpgradeDialogueTypewriterInterval = FMath::Clamp(PacedInterval, 0.015f, 0.06f);
+
+	World->GetTimerManager().SetTimer(
+		UpgradeDialogueTypewriterTimer, this, &ThisClass::TickUpgradeDialogueTypewriter,
+		UpgradeDialogueTypewriterInterval, true);
+}
+
+void USOTMDemoPhase3WorldSubsystem::TickUpgradeDialogueTypewriter()
+{
+	if (!UpgradeDialogueLineText.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+		}
+		return;
+	}
+
+	++UpgradeDialogueRevealedChars;
+	UpgradeDialogueLineText->SetText(FText::FromString(UpgradeDialogueFullLine.Left(UpgradeDialogueRevealedChars)));
+
+	if (UpgradeDialogueRevealedChars >= UpgradeDialogueFullLine.Len())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+		}
+	}
+}
+
+void USOTMDemoPhase3WorldSubsystem::HandleUpgradeDialogueAudioFinished()
+{
+	if (UpgradeDialogueAudio)
+	{
+		UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
+	}
+	UpgradeDialogueAudio = nullptr;
+	EndUpgradeUnlockDialogue();
+}
+
+void USOTMDemoPhase3WorldSubsystem::EndUpgradeUnlockDialogue()
+{
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(UpgradeDialoguePreDelayTimer);
+		World->GetTimerManager().ClearTimer(UpgradeDialogueTimeoutTimer);
+		World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+	}
+	UpgradeDialogueFullLine.Empty();
+	UpgradeDialogueRevealedChars = 0;
+
+	if (UpgradeDialogueAudio)
+	{
+		UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
+		UpgradeDialogueAudio->Stop();
+		UpgradeDialogueAudio = nullptr;
+	}
+
+	if (UpgradeDialogueSubtitleRoot.IsValid())
+	{
+		UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+		if (UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr)
+		{
+			Viewport->RemoveViewportWidgetContent(UpgradeDialogueSubtitleRoot.ToSharedRef());
+		}
+	}
+	UpgradeDialogueSubtitleRoot.Reset();
+	UpgradeDialogueSpeakerText.Reset();
+	UpgradeDialogueLineText.Reset();
+
+	// Restore every gameplay HUD instance to exactly the visibility it had before.
+	for (const TPair<TWeakObjectPtr<UUserWidget>, ESlateVisibility>& Pair : HiddenGameplayUIWidgets)
+	{
+		if (UUserWidget* Widget = Pair.Key.Get())
+		{
+			Widget->SetVisibility(Pair.Value);
+		}
+	}
+	HiddenGameplayUIWidgets.Reset();
+
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	if (PC)
+	{
+		// Every caller that can trigger this dialogue (HandleUnlockClicked /
+		// HandleLightningUnlockClicked on the Upgrade Station widget, and the matching
+		// flow on the Skill Tree widget) fires while that shop/skill-tree panel is
+		// still open - so hand control straight back to it: cursor visible, GameAndUI,
+		// and explicitly focused on its root widget. FInputModeGameAndUI defaults
+		// bHideCursorDuringCapture to true, and without an explicit focus target Slate
+		// can leave the software cursor effectively invisible even with bShowMouseCursor
+		// true - both are why just restoring the bool and GameAndUI wasn't enough.
+		UUserWidget* FocusWidget = nullptr;
+		if (UpgradeWidget) { FocusWidget = UpgradeWidget; }
+		else if (SkillTreeWidget) { FocusWidget = SkillTreeWidget; }
+
+		if (FocusWidget)
+		{
+			PC->bShowMouseCursor = true;
+			FInputModeGameAndUI RestoredInputMode;
+			RestoredInputMode.SetWidgetToFocus(FocusWidget->TakeWidget());
+			RestoredInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			RestoredInputMode.SetHideCursorDuringCapture(false);
+			PC->SetInputMode(RestoredInputMode);
+		}
+		else
+		{
+			// Defensive fallback if this dialogue is ever triggered outside a shop UI
+			// context in the future - restore exactly whatever cursor state existed
+			// before the dialogue began.
+			PC->bShowMouseCursor = bPreviousMouseCursorUpgradeDialogue;
+			if (bPreviousMouseCursorUpgradeDialogue)
+			{
+				FInputModeGameAndUI RestoredInputMode;
+				RestoredInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+				RestoredInputMode.SetHideCursorDuringCapture(false);
+				PC->SetInputMode(RestoredInputMode);
+			}
+			else
+			{
+				FInputModeGameOnly InputMode;
+				PC->SetInputMode(InputMode);
+			}
+		}
+	}
+	if (PlayerState && bUpgradeDialogueInputLockHeld)
+	{
+		PlayerState->ReleaseInputLock(ESOTMInputLockReason::Cinematic);
+	}
+	bUpgradeDialogueInputLockHeld = false;
 }
 
 ESOTMLightningThrowPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseLightningThrow()
@@ -810,6 +1126,10 @@ ESOTMLightningThrowPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseLigh
 		{
 			UGameplayStatics::PlaySound2D(this, Sound, 0.62f);
 		}
+		BeginUpgradeUnlockDialogue(
+			SOTMPhase3Private::TimmyLightningThrowUnlockVO,
+			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+			NSLOCTEXT("SOTM", "TimmyLightningThrowUnlocked", "Run when they are close, or you die."));
 	}
 	else if (Result != ESOTMLightningThrowPurchaseResult::AlreadyOwned)
 	{
