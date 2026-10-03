@@ -316,7 +316,7 @@ Unreal assets. Do not commit generated files from:
 - Saved
 - local packaged-build folders
 
-Unreal binary assets must remain under Git LFS according to .gitattributes.
+Unreal binary assets must remain under Git LFS according to .gitattributes...
 
 
 QUICK START SUMMARY
