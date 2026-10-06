@@ -1,5 +1,7 @@
 #include "Ability/SOTMLightningThrowWorldSubsystem.h"
 
+#include "Ability/SOTMLightningStunComponent.h"
+
 #include "AI/SOTMCousinAIController.h"
 #include "AI/SOTMCousinCharacter.h"
 #include "Ability/SOTMLightningThrowSettings.h"
@@ -256,7 +258,34 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 			StunnedCousin = *It;
 		}
 	}
-	const FVector ImpactPoint = StunnedCousin ? StunnedCousin->GetActorLocation() : PlayerLocation;
+	// Boss (anything carrying a Lightning Stun Component, e.g. Isabella): the nearest valid
+	// target overall wins, cousin or boss.
+	USOTMLightningStunComponent* BossStun = nullptr;
+	float BossDistance = TNumericLimits<float>::Max();
+	for (TActorIterator<APawn> PawnIt(World); PawnIt; ++PawnIt)
+	{
+		USOTMLightningStunComponent* Comp = PawnIt->FindComponentByClass<USOTMLightningStunComponent>();
+		if (!Comp || !Comp->CanBeStunned())
+		{
+			continue;
+		}
+		const float Distance = FVector::Dist(PawnIt->GetActorLocation(), PlayerLocation);
+		if (Distance <= PlayerState->GetEffectiveLightningThrowRange() && Distance < BossDistance)
+		{
+			BossDistance = Distance;
+			BossStun = Comp;
+		}
+	}
+	if (BossStun && BossDistance <= NearestDistance)
+	{
+		StunnedCousin = nullptr;
+	}
+	else
+	{
+		BossStun = nullptr;
+	}
+	const FVector ImpactPoint = StunnedCousin ? StunnedCousin->GetActorLocation()
+		: (BossStun ? BossStun->GetOwner()->GetActorLocation() : PlayerLocation);
 
 	int32 StunnedCount = 0;
 	if (StunnedCousin)
@@ -298,6 +327,20 @@ int32 USOTMLightningThrowWorldSubsystem::TryThrowLightning()
 						Sibling->AggravateTowards(Pawn);
 					}
 				}
+			}
+		}
+	}
+
+	if (BossStun && BossStun->ApplyLightningStun(Settings->StunDuration))
+	{
+		++StunnedCount;
+		if (UClass* BurstClass = LoadClass<AActor>(nullptr, SOTMLightningPrivate::LightningBurstActorPath))
+		{
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			if (AActor* Burst = World->SpawnActor<AActor>(BurstClass, ImpactPoint, FRotator::ZeroRotator, SpawnParams))
+			{
+				Burst->SetLifeSpan(FMath::Max(0.5f, Settings->StunDuration));
 			}
 		}
 	}

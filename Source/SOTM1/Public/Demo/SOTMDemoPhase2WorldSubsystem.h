@@ -39,6 +39,13 @@ public:
 	UFUNCTION(BlueprintPure, Category="SOTM|Cousin")
 	bool IsCousinCatchActive() const { return bCatchActive; }
 
+	/**
+	 * While true, no Cousin voice line or subtitle is played. Turning it on also
+	 * immediately stops any Cousin voice/subtitle already showing. Used by other
+	 * dialogues (e.g. Timmy's chest line) that must have the player's full focus.
+	 */
+	void SetDialogueSuppressed(bool bSuppressed);
+
 	UPROPERTY(BlueprintAssignable, Category="SOTM|Cousin|Events")
 	FSOTMCousinWarningSignature OnCousinWarningChanged;
 
@@ -113,6 +120,7 @@ private:
 	TWeakObjectPtr<AActor> CaughtPlayer;
 	TSet<TWeakObjectPtr<ASOTMCousinAIController>> WarnedControllers;
 	bool bCatchActive = false;
+	bool bDialogueSuppressed = false;
 	bool bCatchImpactApplied = false;
 	bool bJumpScareLockHeld = false;
 

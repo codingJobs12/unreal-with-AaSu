@@ -23,6 +23,9 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "SOTMPlayerStateSubsystem.h"
+#include "Blueprint/UserWidget.h"
+#include "UObject/UObjectIterator.h"
+#include "UI/SOTMSubtitleStyle.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
@@ -34,6 +37,116 @@
 
 namespace SOTMDemoPhase1Private
 {
+	/** Calls ShowLoadingScreen on Menu System Pro's menu container (reflection - it is a
+	 * Blueprint function), passing the CH1 level meta data as the payload. */
+	bool ShowMenuSystemLoadingScreen(UObject* Context)
+	{
+		UWorld* World = Context ? Context->GetWorld() : nullptr;
+		if (!World)
+		{
+			return false;
+		}
+		UUserWidget* Container = nullptr;
+		UFunction* ShowFunction = nullptr;
+		for (TObjectIterator<UUserWidget> It; It; ++It)
+		{
+			UUserWidget* Widget = *It;
+			if (!IsValid(Widget) || Widget->HasAnyFlags(RF_ClassDefaultObject) || Widget->GetWorld() != World)
+			{
+				continue;
+			}
+			UFunction* Function = Widget->FindFunction(TEXT("ShowLoadingScreen"));
+			if (!Function)
+			{
+				continue;
+			}
+			// Prefer the actual menu container over individual menus that merely forward the call.
+			if (!Container || Widget->GetClass()->GetName().Contains(TEXT("Container")))
+			{
+				Container = Widget;
+				ShowFunction = Function;
+			}
+		}
+		UObject* LevelMetaData = LoadObject<UObject>(nullptr,
+			TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/MetaData/DA_CH1.DA_CH1"));
+		if (!Container || !ShowFunction)
+		{
+			// The Mansion level has no Menu System Pro container, so show WBP_LoadingScreenMenu itself.
+			UClass* LoadingClass = LoadClass<UUserWidget>(nullptr,
+				TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Menus/LoadingScreen/WBP_LoadingScreenMenu.WBP_LoadingScreenMenu_C"));
+			APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+			if (!LoadingClass || !PC)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SOTM loading screen: WBP_LoadingScreenMenu unavailable (class %s, controller %s)."),
+					LoadingClass ? TEXT("ok") : TEXT("missing"), PC ? TEXT("ok") : TEXT("missing"));
+				return false;
+			}
+			UUserWidget* Loading = CreateWidget<UUserWidget>(PC, LoadingClass);
+			if (!Loading)
+			{
+				return false;
+			}
+			Loading->AddToViewport(10000);
+			// Menu System Pro hands the level meta data over through ReceivedPayload.
+			if (UFunction* PayloadFunction = Loading->FindFunction(TEXT("ReceivedPayload")))
+			{
+				TArray<uint8> PayloadParams;
+				PayloadParams.SetNumZeroed(FMath::Max<int32>(PayloadFunction->ParmsSize, 1));
+				for (TFieldIterator<FProperty> It(PayloadFunction); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+				{
+					It->InitializeValue_InContainer(PayloadParams.GetData());
+					if (FObjectProperty* ObjectParam = CastField<FObjectProperty>(*It))
+					{
+						if (LevelMetaData && LevelMetaData->IsA(ObjectParam->PropertyClass))
+						{
+							ObjectParam->SetObjectPropertyValue_InContainer(PayloadParams.GetData(), LevelMetaData);
+						}
+					}
+				}
+				Loading->ProcessEvent(PayloadFunction, PayloadParams.GetData());
+				for (TFieldIterator<FProperty> It(PayloadFunction); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+				{
+					It->DestroyValue_InContainer(PayloadParams.GetData());
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SOTM loading screen: ReceivedPayload not found on WBP_LoadingScreenMenu."));
+			}
+			UE_LOG(LogTemp, Display, TEXT("SOTM loading screen: showed WBP_LoadingScreenMenu directly."));
+			return true;
+		}
+		TArray<uint8> Params;
+		Params.SetNumZeroed(FMath::Max<int32>(ShowFunction->ParmsSize, 1));
+		for (TFieldIterator<FProperty> It(ShowFunction); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			It->InitializeValue_InContainer(Params.GetData());
+		}
+		for (TFieldIterator<FProperty> It(ShowFunction); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			UE_LOG(LogTemp, Display, TEXT("SOTM loading screen: %s param %s (%s)"),
+				*ShowFunction->GetName(), *It->GetName(), *It->GetCPPType());
+			if (It->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				continue;
+			}
+			if (FObjectProperty* ObjectParam = CastField<FObjectProperty>(*It))
+			{
+				if (LevelMetaData && LevelMetaData->IsA(ObjectParam->PropertyClass))
+				{
+					ObjectParam->SetObjectPropertyValue_InContainer(Params.GetData(), LevelMetaData);
+				}
+			}
+		}
+		Container->ProcessEvent(ShowFunction, Params.GetData());
+		for (TFieldIterator<FProperty> It(ShowFunction); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			It->DestroyValue_InContainer(Params.GetData());
+		}
+		UE_LOG(LogTemp, Display, TEXT("SOTM loading screen: called %s on %s."), *ShowFunction->GetName(), *Container->GetName());
+		return true;
+	}
+
 	const FName MainMenuMap(TEXT("/Game/Main_Menu_Map"));
 	const FName MansionMap(TEXT("/Game/Mansion_GameStart"));
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
@@ -403,9 +516,27 @@ void USOTMDemoPhase1WorldSubsystem::PlayIntroDialogueStep()
 			NSLOCTEXT("SOTM", "IsabellaDrag", "If you want to run so bad… let’s see how far you get."));
 		break;
 	case 8:
-		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest001,
-			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
-			NSLOCTEXT("SOTM", "TimmyForest1", "You’re in her Forest Domain… the only place you can regain your powers."));
+		// 1 second pause before the Forest Domain line starts.
+		SetSubtitle(NSLOCTEXT("SOTM", "TimmyName", "TIMMY"), FText::GetEmpty(), 0.0f);
+		if (UWorld* World = GetWorld())
+		{
+			TWeakObjectPtr<USOTMDemoPhase1WorldSubsystem> WeakThis(this);
+			World->GetTimerManager().SetTimer(DialogueAdvanceTimer, FTimerDelegate::CreateLambda([WeakThis]()
+			{
+				if (USOTMDemoPhase1WorldSubsystem* Self = WeakThis.Get())
+				{
+					Self->PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest001,
+						NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+						NSLOCTEXT("SOTM", "TimmyForest1", "You’re in her Forest Domain… the only place you can regain your powers."));
+				}
+			}), 1.0f, false);
+		}
+		else
+		{
+			PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest001,
+				NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
+				NSLOCTEXT("SOTM", "TimmyForest1", "You’re in her Forest Domain… the only place you can regain your powers."));
+		}
 		break;
 	case 9:
 		PlayTemporaryDialogue(SOTMDemoPhase1Private::TimmyForest002,
@@ -535,7 +666,14 @@ void USOTMDemoPhase1WorldSubsystem::HandleTemporaryDialogueFinished()
 void USOTMDemoPhase1WorldSubsystem::TravelToForest()
 {
 	RemoveSubtitleOverlay();
+	// The Chapter 1 loading screen (USOTMLoadingScreenSubsystem) shows itself the moment the level
+	// starts loading, so the old Menu System Pro widget is no longer put on screen first.
 	UE_LOG(LogTemp, Display, TEXT("SOTM Demo Phase 1: Mansion intro complete; travelling to production CH1."));
+	OpenForestLevel();
+}
+
+void USOTMDemoPhase1WorldSubsystem::OpenForestLevel()
+{
 	UGameplayStatics::OpenLevel(this, SOTMDemoPhase1Private::ForestMap);
 }
 
@@ -632,11 +770,13 @@ void USOTMDemoPhase1WorldSubsystem::CreateSubtitleOverlay()
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 				[
 					SAssignNew(SubtitleSpeakerText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.ColorAndOpacity(FLinearColor(0.72f, 0.16f, 0.88f, 1.0f))
 				]
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 6.0f, 0.0f, 0.0f)
 				[
 					SAssignNew(SubtitleLineText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.ColorAndOpacity(FLinearColor::White)
 					.WrapTextAt(900.0f)
 					.Justification(ETextJustify::Center)

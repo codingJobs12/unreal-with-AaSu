@@ -7,9 +7,21 @@
 #include "AI/SOTMCousinAIController.h"
 #include "AI/SOTMCousinCharacter.h"
 #include "Components/AudioComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponentPool.h"
+#include "NiagaraWorldManager.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Demo/SOTMDemoPhase2WorldSubsystem.h"
 #include "Engine/GameInstance.h"
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
@@ -23,6 +35,7 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "SOTMPlayerBlueprintLibrary.h"
 #include "SOTMPlayerStateSubsystem.h"
+#include "UI/SOTMSubtitleStyle.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
@@ -44,6 +57,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogSOTMPhase3, Log, All);
 
 namespace SOTMPhase3Private
 {
+	const TCHAR* SpeedBoostSequencePath = TEXT("/Game/Sequence/SpeedBoost_Sequence.SpeedBoost_Sequence");
+	const TCHAR* LightningThrowSequencePath = TEXT("/Game/Sequence/LightingThrow_Sequence1.LightingThrow_Sequence1");
 	const FName ForestMap(TEXT("/Game/MenuSystemPro/ExampleContent/Designs/Design_Silence/Levels/CH1"));
 	const TCHAR* CharacterOnFootContextPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IMC_CharacterOnFoot.IMC_CharacterOnFoot");
 	const TCHAR* SprintActionPath = TEXT("/Game/MenuSystemPro/Blueprints/Input/CharacterOnFoot/IA_Sprint.IA_Sprint");
@@ -53,7 +68,13 @@ namespace SOTMPhase3Private
 	const TCHAR* UpgradeSuccessSound = TEXT("/Game/Audio/SFX/Temporary/SFX_TEMP_UpgradeSuccess.SFX_TEMP_UpgradeSuccess");
 	const TCHAR* BoostSound = TEXT("/Game/SuperPowers/Powers/Speedster/SFX/Cue/WindGust_Cue.WindGust_Cue");
 	const TCHAR* TimmySpeedBoostUnlockVO = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Upgrade_001.VO_TEMP_Timmy_Upgrade_001");
-	const TCHAR* TimmyLightningThrowUnlockVO = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Upgrade_002.VO_TEMP_Timmy_Upgrade_002");
+	const TCHAR* SpeedBoostBurstVFX = TEXT("/Game/DashVFX/VFX/NS_Dash_10.NS_Dash_10");
+	const TCHAR* LightningBurstVFX = TEXT("/Game/DashVFX/VFX/NS_Dash_15.NS_Dash_15");
+	constexpr float BurstMaxLingerSeconds = 2.5f;  // safety: continue even if the system never reports finished
+	const TCHAR* TimmySpeedBoostUnlockVO2 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_Timmy_Upgrade_002.VO_TEMP_Timmy_Upgrade_002");
+	const TCHAR* TimmyLightningThrowUnlockVO = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_TIMMY_UPGRADE_L_1.VO_TEMP_TIMMY_UPGRADE_L_1");
+	const TCHAR* TimmyLightningThrowUnlockVO2 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_TIMMY_UPGRADE_L_2.VO_TEMP_TIMMY_UPGRADE_L_2");
+	const TCHAR* TimmyLightningThrowUnlockVO3 = TEXT("/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_TIMMY_UPGRADE_L_3.VO_TEMP_TIMMY_UPGRADE_L_3");
 
 	FName NormalizeMapPackageName(const UWorld* World)
 	{
@@ -93,6 +114,7 @@ void USOTMDemoPhase3WorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void USOTMDemoPhase3WorldSubsystem::Deinitialize()
 {
+	StopSpeedBoostSequence();
 	EndUpgradeUnlockDialogue();
 	if (ActiveBoostAudio)
 	{
@@ -792,7 +814,12 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 			SOTMPhase3Private::TimmySpeedBoostUnlockVO,
 			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
 			NSLOCTEXT("SOTM", "TimmySpeedBoostUnlocked",
-				"Okay… I’ve restored your speed boost. But use it wisely. You get tired after a while."));
+				"Okay… I can restore your speed boost. But use it wisely. There’s a cooldown."));
+		PendingDialogueEffectPath = SOTMPhase3Private::SpeedBoostBurstVFX;
+		QueueUpgradeDialogueLine(
+			SOTMPhase3Private::TimmySpeedBoostUnlockVO2,
+			NSLOCTEXT("SOTM", "TimmySpeedBoostUnlocked2", "Run when they’re close. Or you die."));
+		StartSpeedBoostSequence(SOTMPhase3Private::SpeedBoostSequencePath);
 	}
 	else if (Result != ESOTMSpeedBoostPurchaseResult::AlreadyOwned)
 	{
@@ -803,6 +830,80 @@ ESOTMSpeedBoostPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseSpeedBoo
 	}
 	UE_LOG(LogSOTMPhase3, Display, TEXT("Speed Boost purchase result=%d"), static_cast<int32>(Result));
 	return Result;
+}
+
+void USOTMDemoPhase3WorldSubsystem::StartSpeedBoostSequence(const TCHAR* SequencePath)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	if (ULevelSequence* Sequence = LoadObject<ULevelSequence>(nullptr, SequencePath))
+	{
+		FMovieSceneSequencePlaybackSettings Settings;
+		Settings.bPauseAtEnd = false;
+		Settings.bDisableCameraCuts = false;
+		ALevelSequenceActor* CreatedActor = nullptr;
+		SpeedBoostSequencePlayer = ULevelSequencePlayer::CreateLevelSequencePlayer(World, Sequence, Settings, CreatedActor);
+		SpeedBoostSequenceActor = CreatedActor;
+		if (SpeedBoostSequencePlayer)
+		{
+			bSpeedBoostSequencePlaying = true;
+			SpeedBoostSequencePlayer->OnFinished.AddUniqueDynamic(this, &ThisClass::HandleSpeedBoostSequenceFinished);
+			const float SequenceSeconds = SpeedBoostSequencePlayer->GetDuration().AsSeconds();
+			// Safety net in case OnFinished never fires.
+			World->GetTimerManager().SetTimer(
+				SpeedBoostSequenceTimeoutTimer, this, &ThisClass::HandleSpeedBoostSequenceFinished,
+				FMath::Max(SequenceSeconds, 0.1f) + 2.0f, false);
+			SpeedBoostSequencePlayer->Play();
+			UE_LOG(LogSOTMPhase3, Display, TEXT("Unlock sequence %s playing duration=%.2fs"), SequencePath, SequenceSeconds);
+			return;
+		}
+	}
+	UE_LOG(LogSOTMPhase3, Warning, TEXT("Unlock sequence unavailable (%s)."), SequencePath);
+}
+
+void USOTMDemoPhase3WorldSubsystem::StopSpeedBoostSequence()
+{
+	bSpeedBoostSequencePlaying = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SpeedBoostSequenceTimeoutTimer);
+	}
+	if (SpeedBoostSequencePlayer)
+	{
+		SpeedBoostSequencePlayer->OnFinished.RemoveAll(this);
+		SpeedBoostSequencePlayer->Stop();
+		SpeedBoostSequencePlayer = nullptr;
+	}
+	if (SpeedBoostSequenceActor)
+	{
+		SpeedBoostSequenceActor->Destroy();
+		SpeedBoostSequenceActor = nullptr;
+	}
+}
+
+void USOTMDemoPhase3WorldSubsystem::HandleSpeedBoostSequenceFinished()
+{
+	if (!bSpeedBoostSequencePlaying)
+	{
+		return;
+	}
+	bSpeedBoostSequencePlaying = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SpeedBoostSequenceTimeoutTimer);
+	}
+	if (SpeedBoostSequencePlayer)
+	{
+		SpeedBoostSequencePlayer->OnFinished.RemoveAll(this);
+	}
+	// If the dialogue already finished while the sequence was still running, finish it now.
+	if (bUpgradeDialogueEndPending)
+	{
+		EndUpgradeUnlockDialogue();
+	}
 }
 
 void USOTMDemoPhase3WorldSubsystem::BeginUpgradeUnlockDialogue(
@@ -816,6 +917,7 @@ void USOTMDemoPhase3WorldSubsystem::BeginUpgradeUnlockDialogue(
 
 	// Re-triggering while a previous line is still showing just restarts it clean
 	// instead of stacking overlays/locks.
+	StopSpeedBoostSequence();
 	EndUpgradeUnlockDialogue();
 
 	PendingDialogueVOPath = VOPath;
@@ -823,6 +925,12 @@ void USOTMDemoPhase3WorldSubsystem::BeginUpgradeUnlockDialogue(
 	PendingDialogueLine = Line;
 
 	HideGameplayUIForDialogue();
+
+	// Cousins must not talk over this line / sequence.
+	if (USOTMDemoPhase2WorldSubsystem* Phase2 = World->GetSubsystem<USOTMDemoPhase2WorldSubsystem>())
+	{
+		Phase2->SetDialogueSuppressed(true);
+	}
 
 	// Small beat so the HUD has visibly cleared before the line starts, rather
 	// than the subtitle popping in on the exact same frame as the HUD vanishing.
@@ -885,6 +993,23 @@ void USOTMDemoPhase3WorldSubsystem::HideGameplayUIForDialogue()
 
 void USOTMDemoPhase3WorldSubsystem::PlayPendingUpgradeDialogueLine()
 {
+	CurrentLineEffectPath = PendingDialogueEffectPath;
+	PendingDialogueEffectPath = nullptr;
+	PreloadUpgradeBurstEffect(CurrentLineEffectPath);
+	// Warm the NEXT line's voice asynchronously so its sync LoadObject later is instant.
+	if (QueuedUpgradeLines.Num() > 0 && QueuedUpgradeLines[0].VOPath)
+	{
+		const FSoftObjectPath NextVO(QueuedUpgradeLines[0].VOPath);
+		UpgradeVOPreloadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+			NextVO, FStreamableDelegate::CreateWeakLambda(this, [this, NextVO]()
+			{
+				if (USoundBase* Sound = Cast<USoundBase>(NextVO.ResolveObject()))
+				{
+					PreloadedUpgradeVOs.AddUnique(Sound);
+					UGameplayStatics::PrimeSound(Sound);
+				}
+			}));
+	}
 	UWorld* World = GetWorld();
 	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
 	UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr;
@@ -907,12 +1032,14 @@ void USOTMDemoPhase3WorldSubsystem::PlayPendingUpgradeDialogueLine()
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 				[
 					SAssignNew(UpgradeDialogueSpeakerText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.Text(PendingDialogueSpeaker)
 					.ColorAndOpacity(FLinearColor(0.72f, 0.16f, 0.88f, 1.0f))
 				]
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.0f, 6.0f, 0.0f, 0.0f)
 				[
 					SAssignNew(UpgradeDialogueLineText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.Text(FText::GetEmpty())
 					.ColorAndOpacity(FLinearColor::White)
 					.WrapTextAt(900.0f)
@@ -940,7 +1067,7 @@ void USOTMDemoPhase3WorldSubsystem::PlayPendingUpgradeDialogueLine()
 			PendingDialogueVOPath, VODuration);
 		// Safety net in case OnAudioFinished never fires (e.g. audio device issue).
 		World->GetTimerManager().SetTimer(
-			UpgradeDialogueTimeoutTimer, this, &ThisClass::EndUpgradeUnlockDialogue, VODuration + 1.0f, false);
+			UpgradeDialogueTimeoutTimer, this, &ThisClass::HandleUpgradeLineFinished, VODuration + 1.0f, false);
 		StartUpgradeDialogueTypewriter(VODuration);
 		return;
 	}
@@ -948,7 +1075,7 @@ void USOTMDemoPhase3WorldSubsystem::PlayPendingUpgradeDialogueLine()
 	UE_LOG(LogSOTMPhase3, Warning, TEXT("Upgrade unlock VO unavailable (%s) - falling back to timed subtitle."),
 		PendingDialogueVOPath);
 	World->GetTimerManager().SetTimer(
-		UpgradeDialogueTimeoutTimer, this, &ThisClass::EndUpgradeUnlockDialogue, 4.5f, false);
+		UpgradeDialogueTimeoutTimer, this, &ThisClass::HandleUpgradeLineFinished, 4.5f, false);
 	StartUpgradeDialogueTypewriter(4.0f);
 }
 
@@ -1011,12 +1138,260 @@ void USOTMDemoPhase3WorldSubsystem::HandleUpgradeDialogueAudioFinished()
 		UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
 	}
 	UpgradeDialogueAudio = nullptr;
-	EndUpgradeUnlockDialogue();
+	HandleUpgradeLineFinished();
+}
+
+void USOTMDemoPhase3WorldSubsystem::PreloadUpgradeBurstEffect(const TCHAR* EffectPath)
+{
+	if (!EffectPath)
+	{
+		return;
+	}
+	// Pre-create pooled components for this system so the spawn later only re-activates one.
+	auto Prime = [this](UNiagaraSystem* System)
+	{
+		UWorld* World = GetWorld();
+		if (!System || !World)
+		{
+			return;
+		}
+		LoadedUpgradeEffectSystems.AddUnique(System);
+		if (FNiagaraWorldManager* Manager = FNiagaraWorldManager::Get(World))
+		{
+			if (UNiagaraComponentPool* Pool = Manager->GetComponentPool())
+			{
+				Pool->PrimePool(System, World);
+			}
+		}
+	};
+	if (UNiagaraSystem* Existing = FindObject<UNiagaraSystem>(nullptr, EffectPath))
+	{
+		Prime(Existing);
+		return;
+	}
+	// Async so the asset is resident before the VO ends; a sync load at spawn time was a hitch.
+	const FSoftObjectPath Path(EffectPath);
+	UpgradeEffectPreloadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+		Path, FStreamableDelegate::CreateWeakLambda(this, [this, Path, Prime]()
+		{
+			Prime(Cast<UNiagaraSystem>(Path.ResolveObject()));
+		}));
+}
+
+bool USOTMDemoPhase3WorldSubsystem::PlayUpgradeBurstEffect(const TCHAR* EffectPath)
+{
+	UWorld* World = GetWorld();
+	APawn* Pawn = World ? UGameplayStatics::GetPlayerPawn(World, 0) : nullptr;
+	UNiagaraSystem* System = EffectPath ? FindObject<UNiagaraSystem>(nullptr, EffectPath) : nullptr;
+	if (!System && EffectPath)
+	{
+		System = LoadObject<UNiagaraSystem>(nullptr, EffectPath); // fallback only
+	}
+	if (!Pawn || !System)
+	{
+		UE_LOG(LogSOTMPhase3, Warning, TEXT("Upgrade burst VFX skipped (pawn/system missing): %s"), EffectPath ? EffectPath : TEXT("null"));
+		return false;
+	}
+
+	UNiagaraComponent* Comp = nullptr;
+	if (EffectPath == SOTMPhase3Private::LightningBurstVFX)
+	{
+		// Lightning Throw: energy builds around the player's hand, following the animation.
+		USkeletalMeshComponent* Mesh = Cast<ACharacter>(Pawn) ? Cast<ACharacter>(Pawn)->GetMesh() : nullptr;
+		if (Mesh)
+		{
+			static const FName HandSockets[] = {
+				TEXT("hand_r"), TEXT("Hand_R"), TEXT("RightHand"), TEXT("mixamorig:RightHand"),
+				TEXT("FlashLight"), TEXT("hand_l"), TEXT("LeftHand") };
+			for (const FName& Socket : HandSockets)
+			{
+				if (Mesh->DoesSocketExist(Socket))
+				{
+					Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+						System, Mesh, Socket, FVector::ZeroVector, FRotator::ZeroRotator,
+						EAttachLocation::SnapToTarget, /*bAutoDestroy*/ true, /*bAutoActivate*/ true,
+						ENCPoolMethod::AutoRelease, /*bPreCullCheck*/ false);
+					break;
+				}
+			}
+		}
+	}
+	if (!Comp)
+	{
+		Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World, System, Pawn->GetActorLocation(), Pawn->GetActorRotation(), FVector::OneVector,
+			/*bAutoDestroy*/ true, /*bAutoActivate*/ true, ENCPoolMethod::AutoRelease, /*bPreCullCheck*/ false);
+	}
+	if (!Comp)
+	{
+		return false;
+	}
+	UpgradeEffectComp = Comp;
+	bUpgradeEffectPlaying = true;
+	Comp->OnSystemFinished.AddUniqueDynamic(this, &ThisClass::HandleUpgradeEffectFinished);
+
+	// Safety: continue even if the system never reports finished (e.g. a looping system).
+	World->GetTimerManager().SetTimer(
+		UpgradeEffectFallbackTimer, this, &ThisClass::HandleUpgradeEffectFallback,
+		SOTMPhase3Private::BurstMaxLingerSeconds, false);
+	return true;
+}
+
+void USOTMDemoPhase3WorldSubsystem::StopUpgradeBurstEffect()
+{
+	bUpgradeEffectPlaying = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(UpgradeEffectFallbackTimer);
+	}
+	if (UNiagaraComponent* C = UpgradeEffectComp.Get())
+	{
+		C->OnSystemFinished.RemoveAll(this);
+		if (C->IsActive())
+		{
+			C->DeactivateImmediate();
+		}
+	}
+	UpgradeEffectComp.Reset();
+}
+
+void USOTMDemoPhase3WorldSubsystem::HandleUpgradeEffectFinished(UNiagaraComponent* /*FinishedComponent*/)
+{
+	if (!bUpgradeEffectPlaying)
+	{
+		return;
+	}
+	StopUpgradeBurstEffect();
+	HandleUpgradeLineFinished();
+}
+
+void USOTMDemoPhase3WorldSubsystem::HandleUpgradeEffectFallback()
+{
+	HandleUpgradeEffectFinished(nullptr);
+}
+
+void USOTMDemoPhase3WorldSubsystem::QueueUpgradeDialogueLine(const TCHAR* VOPath, const FText& Line, const TCHAR* EffectPath)
+{
+	FQueuedUpgradeLine& Entry = QueuedUpgradeLines.AddDefaulted_GetRef();
+	Entry.EffectPath = EffectPath;
+	Entry.VOPath = VOPath;
+	Entry.Line = Line;
+}
+
+void USOTMDemoPhase3WorldSubsystem::HandleUpgradeLineFinished()
+{
+	UWorld* World = GetWorld();
+	if (World && CurrentLineEffectPath && !bUpgradeEffectPlaying)
+	{
+		// This line has a burst effect: drop the subtitle/audio, play it, and only
+		// continue (next line / restore) once the effect has finished.
+		const TCHAR* EffectPath = CurrentLineEffectPath;
+		CurrentLineEffectPath = nullptr;
+		World->GetTimerManager().ClearTimer(UpgradeDialogueTimeoutTimer);
+		World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+		if (UpgradeDialogueAudio)
+		{
+			UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
+			UpgradeDialogueAudio = nullptr;
+		}
+		if (UpgradeDialogueSubtitleRoot.IsValid())
+		{
+			UGameInstance* GameInstance = World->GetGameInstance();
+			if (UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr)
+			{
+				Viewport->RemoveViewportWidgetContent(UpgradeDialogueSubtitleRoot.ToSharedRef());
+			}
+		}
+		UpgradeDialogueSubtitleRoot.Reset();
+		UpgradeDialogueSpeakerText.Reset();
+		UpgradeDialogueLineText.Reset();
+		if (PlayUpgradeBurstEffect(EffectPath))
+		{
+			return;
+		}
+	}
+	CurrentLineEffectPath = nullptr;
+	if (QueuedUpgradeLines.Num() == 0 || !World)
+	{
+		EndUpgradeUnlockDialogue();
+		return;
+	}
+
+	// More lines to go: drop the current line's audio/subtitle, then play the next after a short gap.
+	World->GetTimerManager().ClearTimer(UpgradeDialogueTimeoutTimer);
+	World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+	if (UpgradeDialogueAudio)
+	{
+		UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
+		UpgradeDialogueAudio->Stop();
+		UpgradeDialogueAudio = nullptr;
+	}
+	if (UpgradeDialogueSubtitleRoot.IsValid())
+	{
+		UGameInstance* GameInstance = World->GetGameInstance();
+		if (UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr)
+		{
+			Viewport->RemoveViewportWidgetContent(UpgradeDialogueSubtitleRoot.ToSharedRef());
+		}
+	}
+	UpgradeDialogueSubtitleRoot.Reset();
+	UpgradeDialogueSpeakerText.Reset();
+	UpgradeDialogueLineText.Reset();
+
+	const FQueuedUpgradeLine Next = QueuedUpgradeLines[0];
+	QueuedUpgradeLines.RemoveAt(0);
+	PendingDialogueVOPath = Next.VOPath;
+	PendingDialogueLine = Next.Line;
+	PendingDialogueEffectPath = Next.EffectPath;
+	World->GetTimerManager().SetTimer(
+		UpgradeDialoguePreDelayTimer, this, &ThisClass::PlayPendingUpgradeDialogueLine, 0.35f, false);
 }
 
 void USOTMDemoPhase3WorldSubsystem::EndUpgradeUnlockDialogue()
 {
+	QueuedUpgradeLines.Reset();
+	CurrentLineEffectPath = nullptr;
+	StopUpgradeBurstEffect();
 	UWorld* World = GetWorld();
+	if (bSpeedBoostSequencePlaying)
+	{
+		// The line is over but SpeedBoost_Sequence is still playing: drop the subtitle now,
+		// but keep the HUD hidden / input locked until the sequence finishes.
+		bUpgradeDialogueEndPending = true;
+		if (World)
+		{
+			World->GetTimerManager().ClearTimer(UpgradeDialoguePreDelayTimer);
+			World->GetTimerManager().ClearTimer(UpgradeDialogueTimeoutTimer);
+			World->GetTimerManager().ClearTimer(UpgradeDialogueTypewriterTimer);
+		}
+		if (UpgradeDialogueAudio)
+		{
+			UpgradeDialogueAudio->OnAudioFinished.RemoveAll(this);
+			UpgradeDialogueAudio->Stop();
+			UpgradeDialogueAudio = nullptr;
+		}
+		if (UpgradeDialogueSubtitleRoot.IsValid())
+		{
+			UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+			if (UGameViewportClient* Viewport = GameInstance ? GameInstance->GetGameViewportClient() : nullptr)
+			{
+				Viewport->RemoveViewportWidgetContent(UpgradeDialogueSubtitleRoot.ToSharedRef());
+			}
+		}
+		UpgradeDialogueSubtitleRoot.Reset();
+		UpgradeDialogueSpeakerText.Reset();
+		UpgradeDialogueLineText.Reset();
+		return;
+	}
+	bUpgradeDialogueEndPending = false;
+	StopSpeedBoostSequence();
+	if (World)
+	{
+		if (USOTMDemoPhase2WorldSubsystem* Phase2 = World->GetSubsystem<USOTMDemoPhase2WorldSubsystem>())
+		{
+			Phase2->SetDialogueSuppressed(false);
+		}
+	}
 	if (World)
 	{
 		World->GetTimerManager().ClearTimer(UpgradeDialoguePreDelayTimer);
@@ -1129,7 +1504,15 @@ ESOTMLightningThrowPurchaseResult USOTMDemoPhase3WorldSubsystem::TryPurchaseLigh
 		BeginUpgradeUnlockDialogue(
 			SOTMPhase3Private::TimmyLightningThrowUnlockVO,
 			NSLOCTEXT("SOTM", "TimmyName", "TIMMY"),
-			NSLOCTEXT("SOTM", "TimmyLightningThrowUnlocked", "Run when they are close, or you die."));
+			NSLOCTEXT("SOTM", "TimmyLightningThrowUnlocked1", "This next one… your strongest power. Your Lightning Throw."));
+		PendingDialogueEffectPath = SOTMPhase3Private::LightningBurstVFX;
+		QueueUpgradeDialogueLine(
+			SOTMPhase3Private::TimmyLightningThrowUnlockVO2,
+			NSLOCTEXT("SOTM", "TimmyLightningThrowUnlocked2", "But be careful… it doesn’t kill them. It only STUNS them."));
+		QueueUpgradeDialogueLine(
+			SOTMPhase3Private::TimmyLightningThrowUnlockVO3,
+			NSLOCTEXT("SOTM", "TimmyLightningThrowUnlocked3", "And stunning one cousin… makes the others angry."));
+		StartSpeedBoostSequence(SOTMPhase3Private::LightningThrowSequencePath);
 	}
 	else if (Result != ESOTMLightningThrowPurchaseResult::AlreadyOwned)
 	{

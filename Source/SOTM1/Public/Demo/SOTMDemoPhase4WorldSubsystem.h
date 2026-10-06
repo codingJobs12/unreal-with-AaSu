@@ -2,13 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "Demo/SOTMPhase4Types.h"
+#include "Objective/SOTMObjectiveSubsystem.h"
+#include "Components/SlateWrapperTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "SOTMDemoPhase4WorldSubsystem.generated.h"
 
 class AStaticMeshActor;
 class ASOTMChestActor;
 class ASOTMPhase4Interactable;
+class UAudioComponent;
+class ALevelSequenceActor;
+class ULevelSequencePlayer;
+class UWidgetComponent;
 class UEnhancedInputComponent;
+class UUserWidget;
 class UInputAction;
 class USOTMDemoCompleteWidget;
 class USOTMObjectiveSubsystem;
@@ -37,6 +44,14 @@ public:
 	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
 	bool IsPlayerNearGate() const { return bNearGate; }
 
+	UFUNCTION(BlueprintPure, Category="SOTM|Demo|Phase 4")
+	bool IsChestDialogueActive() const { return bChestDialogueActive; }
+
+	/** Called by ASOTMKeyGateActor when the player unlocks the Isabel gate with the key:
+	 * IsabelaIntro_sequence + Isabella's three lines. The Isabel fight continues afterwards
+	 * (no Demo Complete screen is triggered from this entry point). */
+	void PlayIsabelGateIntro();
+
 #if !UE_BUILD_SHIPPING
 	void BeginDevelopmentAcceptanceRoute();
 	void BeginDevelopmentDeathAfterKeyAcceptance();
@@ -61,6 +76,51 @@ private:
 	void UpdateGatePresentation();
 	void FinishGatePresentation();
 	void ShowDemoComplete();
+
+	// Timmy's chest line: plays when the chest is opened, hides every UI element, locks
+	// all input, silences Cousin voices/subtitles, and types the subtitle in sync with
+	// the VO (same behaviour as the Phase 3 upgrade-unlock dialogue).
+	void BeginChestDialogue();
+	void PlayChestDialogueLine();
+	void StartChestDialogueTypewriter(float TargetDuration);
+	void TickChestDialogueTypewriter();
+	void EndChestDialogue();
+
+	// Isabella gate cutscene: IsabelaIntro_sequence starts when the gate is unlocked; after
+	// 4 seconds Isabella's three lines play (separate VO files, typed subtitles). UI hidden,
+	// input locked and Cousins silenced until the sequence AND the dialogue are both done;
+	// the Demo Complete screen follows afterwards.
+	void BeginIsabelCutscene();
+	void StartIsabelDialogue();
+	void PlayIsabelLine(int32 Index);
+	void PlayNextIsabelLine();
+	void TickIsabelTypewriter();
+	void FinishIsabelLine();
+	void FinishIsabelDialogue();
+	void EndIsabelCutscene(bool bAborted);
+	void HideAllUIWidgets(TMap<TWeakObjectPtr<UUserWidget>, ESlateVisibility>& OutHidden);
+	void RestoreHiddenUIWidgets(TMap<TWeakObjectPtr<UUserWidget>, ESlateVisibility>& Hidden);
+	UFUNCTION()
+	void HandleIsabelLineAudioFinished();
+	UFUNCTION()
+	void HandleIsabelSequenceFinished();
+	// Ends only the spoken line + subtitle; the whole chest cutscene state ends once the
+	// sequence has finished as well (see HandleChestSequenceFinished / EndChestDialogue).
+	void FinishChestDialogueLine();
+	bool IsPlayerWithinChestRange() const;
+	void ResyncChestProximity();
+
+	// Chest marker (the WidgetComponent inside BP_Chest): shown only while the active
+	// objective is "Find the chest", removed for good once the player reaches the chest.
+	void RefreshChestMarker();
+	UFUNCTION()
+	void HandleObjectiveChanged(FSOTMObjectiveData Objective);
+
+	// Chest_Sequence: plays right after the chest opens; the dialogue starts when it ends.
+	UFUNCTION()
+	void HandleChestSequenceFinished();
+	UFUNCTION()
+	void HandleChestDialogueAudioFinished();
 	UFUNCTION()
 	void HideDemoComplete();
 
@@ -107,6 +167,62 @@ private:
 	bool bNearKey = false;
 	bool bGateAnimationRunning = false;
 	bool bDemoInputLockHeld = false;
+
+	bool bChestDialogueActive = false;
+	bool bChestMarkerDismissed = false;
+
+	bool bIsabelCutsceneActive = false;
+	bool bIsabelFromKeyGate = false;
+	bool bIsabelSequencePlaying = false;
+	bool bIsabelDialogueDone = false;
+	bool bIsabelInputLockHeld = false;
+	bool bPreviousMouseCursorIsabel = false;
+	int32 IsabelLineIndex = 0;
+	int32 IsabelRevealedChars = 0;
+	FString IsabelFullLine;
+	TMap<TWeakObjectPtr<UUserWidget>, ESlateVisibility> IsabelHiddenWidgets;
+	TSharedPtr<class SWidget> IsabelSubtitleRoot;
+	TSharedPtr<class STextBlock> IsabelSubtitleLine;
+	FTimerHandle IsabelDialogueStartTimer;
+	FTimerHandle IsabelLineTimeoutTimer;
+	FTimerHandle IsabelTypewriterTimer;
+	FTimerHandle IsabelLineGapTimer;
+	FTimerHandle IsabelSequenceTimeoutTimer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> IsabelVoice;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequencePlayer> IsabelSequencePlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ALevelSequenceActor> IsabelSequenceActor;
+	bool bChestSequencePlaying = false;
+	bool bChestLineDone = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetComponent> ChestMarker;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequencePlayer> ChestSequencePlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ALevelSequenceActor> ChestSequenceActor;
+
+	FTimerHandle ChestSequenceTimeoutTimer;
+	bool bChestDialogueInputLockHeld = false;
+	bool bPreviousMouseCursorChestDialogue = false;
+	TMap<TWeakObjectPtr<UUserWidget>, ESlateVisibility> ChestDialogueHiddenWidgets;
+	TSharedPtr<class SWidget> ChestDialogueSubtitleRoot;
+	TSharedPtr<class STextBlock> ChestDialogueLineText;
+	FString ChestDialogueFullLine;
+	int32 ChestDialogueRevealedChars = 0;
+	FTimerHandle ChestDialoguePreDelayTimer;
+	FTimerHandle ChestDialogueTimeoutTimer;
+	FTimerHandle ChestDialogueTypewriterTimer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> ChestDialogueAudio;
 	float ChestAnimationAlpha = 0.0f;
 	float GateAnimationAlpha = 0.0f;
 	FTransform ChestClosedTransform = FTransform::Identity;

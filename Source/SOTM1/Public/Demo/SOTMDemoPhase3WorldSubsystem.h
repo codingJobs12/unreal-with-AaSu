@@ -9,6 +9,8 @@
 class ASOTMTimmyUpgradeStation;
 class UCharacterMovementComponent;
 class UAudioComponent;
+class ALevelSequenceActor;
+class ULevelSequencePlayer;
 class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -163,9 +165,48 @@ private:
 	// subtitle synced to that line's VO duration (falls back to a fixed timer if
 	// the VO asset is missing), and restores everything once the line ends.
 	void BeginUpgradeUnlockDialogue(const TCHAR* VOPath, const FText& Speaker, const FText& Line);
+	// Adds a follow-up line (played after the current one finishes). Call right after
+	// BeginUpgradeUnlockDialogue; the HUD/input restore happens only after the last line.
+	void QueueUpgradeDialogueLine(const TCHAR* VOPath, const FText& Line, const TCHAR* EffectPath = nullptr);
+
+	// Niagara burst played after a line's VO ends: spawns at the player
+	// (preloaded async to avoid a hitch); the next line starts when it finishes.
+	bool PlayUpgradeBurstEffect(const TCHAR* EffectPath);
+	void PreloadUpgradeBurstEffect(const TCHAR* EffectPath);
+	TSharedPtr<struct FStreamableHandle> UpgradeEffectPreloadHandle;
+	TSharedPtr<struct FStreamableHandle> UpgradeVOPreloadHandle;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class USoundBase>> PreloadedUpgradeVOs;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UNiagaraSystem>> LoadedUpgradeEffectSystems;
+	void StopUpgradeBurstEffect();
+	UFUNCTION()
+	void HandleUpgradeEffectFinished(class UNiagaraComponent* FinishedComponent = nullptr);
+	void HandleUpgradeEffectFallback();
+	TWeakObjectPtr<class UNiagaraComponent> UpgradeEffectComp;
+	FTimerHandle UpgradeEffectFallbackTimer;
+	bool bUpgradeEffectPlaying = false;
+	const TCHAR* PendingDialogueEffectPath = nullptr;
+	const TCHAR* CurrentLineEffectPath = nullptr;
+	void HandleUpgradeLineFinished();
+	struct FQueuedUpgradeLine
+	{
+		const TCHAR* VOPath = nullptr;
+		FText Line;
+		const TCHAR* EffectPath = nullptr;
+	};
+	TArray<FQueuedUpgradeLine> QueuedUpgradeLines;
 	void HideGameplayUIForDialogue();
 	void PlayPendingUpgradeDialogueLine();
 	void EndUpgradeUnlockDialogue();
+
+	// SpeedBoost_Sequence: played together with the Speed Boost unlock dialogue. While it
+	// runs, the dialogue's end (HUD restore / input unlock) waits for it to finish, and
+	// Cousin voices/subtitles are suppressed.
+	void StartSpeedBoostSequence(const TCHAR* SequencePath);
+	void StopSpeedBoostSequence();
+	UFUNCTION()
+	void HandleSpeedBoostSequenceFinished();
 
 	UFUNCTION()
 	void HandleUpgradeDialogueAudioFinished();
@@ -199,4 +240,14 @@ private:
 	TMap<TWeakObjectPtr<class UUserWidget>, ESlateVisibility> HiddenGameplayUIWidgets;
 	bool bUpgradeDialogueInputLockHeld = false;
 	bool bPreviousMouseCursorUpgradeDialogue = false;
+
+	bool bSpeedBoostSequencePlaying = false;
+	bool bUpgradeDialogueEndPending = false;
+	FTimerHandle SpeedBoostSequenceTimeoutTimer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ULevelSequencePlayer> SpeedBoostSequencePlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<ALevelSequenceActor> SpeedBoostSequenceActor;
 };

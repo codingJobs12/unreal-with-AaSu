@@ -1,0 +1,12 @@
+---,Speaker,Text,Voice,Group,NextRow,Priority,Cooldown,MinDisplayTime,SpeakerColor
+Attack_StopRunning,ISABELLA,"STOP RUNNING!",,Attack,,0,8,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Attack_LightningMine,ISABELLA,"LIGHTNING IS MINE!",,Attack,,0,8,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Attack_MadeForMe,ISABELLA,"YOU WERE MADE FOR ME!",,Attack,,0,8,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Attack_DontUseThat,ISABELLA,"DON'T USE THAT POWER AGAINST ME!",,Attack,,0,8,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Attack_Cousins,ISABELLA,"COUSINS— COME!",,Attack,,1,12,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Stunned_Dare,ISABELLA,"AAAH— you dare?!",,,,2,10,1.5,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Stunned_GavePower,ISABELLA,"I GAVE YOU THAT POWER!",,,,2,10,1.8,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+LowHealth_Mother,ISABELLA,"Mother… help me…",,,,5,60,2.5,"(R=0.85,G=0.10,B=0.12,A=1.0)"
+Defeated_Timmy,TIMMY,"You did it… you actually—",,,,10,60,2.5,"(R=0.35,G=0.75,B=1.0,A=1.0)"
+Spider_Landing,SPIDER,"My daughter… and now… my lightning thief.",/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_SPIDER.VO_TEMP_SPIDER,,,10,60,2.5,"(R=0.60,G=0.10,B=0.70,A=1.0)"
+Timmy_Outro,TIMMY,"No… no… She wasn't supposed to wake up yet—!",/Game/Audio/Dialogue/Chapter1/Temporary/VO_TEMP_TIMMY_OUTRO.VO_TEMP_TIMMY_OUTRO,,,10,60,2.5,"(R=0.35,G=0.75,B=1.0,A=1.0)"

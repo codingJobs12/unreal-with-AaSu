@@ -199,6 +199,8 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	CurrentLives = FMath::Clamp(Settings->StartingLives, 1, MaximumLives);
 	PersistentHealth = FMath::Max(1.0f, Settings->MaximumHealth);
 
+#if !UE_BUILD_SHIPPING
+	// Cheat/testing console commands are not registered in Shipping builds.
 	GrantAbilityPointsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("SOTM.GrantAbilityPoints"),
 		TEXT("Grants (or, with a negative amount, removes) Ability Points and immediately saves them, e.g. 'SOTM.GrantAbilityPoints 50'."),
@@ -228,6 +230,7 @@ void USOTMPlayerStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		TEXT("Testing only: completes every objective before 'Reach the Gate' and teleports the player to the Isabel arena, e.g. 'SOTM.SkipToGateMission'."),
 		FConsoleCommandWithArgsDelegate::CreateUObject(
 			this, &USOTMPlayerStateSubsystem::HandleSkipToGateMissionCommand));
+#endif
 }
 
 void USOTMPlayerStateSubsystem::Deinitialize()

@@ -26,6 +26,7 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "SOTMPlayerBlueprintLibrary.h"
 #include "SOTMPlayerStateSubsystem.h"
+#include "UI/SOTMSubtitleStyle.h"
 #include "SOTMPlayerVitalComponent.h"
 #include "Sound/SoundBase.h"
 #include "Styling/CoreStyle.h"
@@ -257,6 +258,10 @@ void USOTMDemoPhase2WorldSubsystem::PlayTemporaryCousinVoice(
 	const FVector& Location,
 	const float Volume)
 {
+	if (bDialogueSuppressed)
+	{
+		return;
+	}
 	USoundBase* Voice = LoadObject<USoundBase>(nullptr, SoundPath);
 	if (!Voice)
 	{
@@ -292,6 +297,22 @@ void USOTMDemoPhase2WorldSubsystem::PlayTemporaryCousinVoice(
 	UE_LOG(LogSOTMPhase2, Display,
 		TEXT("TEMPORARY PLACEHOLDER Cousin VO: %s duration=%.2fs subtitle=%s"),
 		SoundPath, Voice->GetDuration(), *Line.ToString());
+}
+
+void USOTMDemoPhase2WorldSubsystem::SetDialogueSuppressed(const bool bSuppressed)
+{
+	bDialogueSuppressed = bSuppressed;
+	if (!bSuppressed)
+	{
+		return;
+	}
+	if (ActiveCousinVoice)
+	{
+		ActiveCousinVoice->OnAudioFinished.RemoveAll(this);
+		ActiveCousinVoice->Stop();
+		ActiveCousinVoice = nullptr;
+	}
+	RemoveCousinSubtitleOverlay();
 }
 
 void USOTMDemoPhase2WorldSubsystem::HandleTemporaryCousinVoiceFinished()
@@ -332,12 +353,14 @@ void USOTMDemoPhase2WorldSubsystem::CreateCousinSubtitleOverlay()
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 				[
 					SAssignNew(CousinSubtitleSpeakerText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.ColorAndOpacity(FLinearColor(0.72f, 0.16f, 0.88f, 1.0f))
 				]
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 				[
 					SAssignNew(CousinSubtitleLineText, STextBlock)
+					.Font(SOTMSubtitle::Font())
 					.ColorAndOpacity(FLinearColor::White)
 					.Justification(ETextJustify::Center)
 				]

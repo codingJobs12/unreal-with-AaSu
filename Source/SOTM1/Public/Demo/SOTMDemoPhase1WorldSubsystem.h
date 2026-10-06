@@ -41,6 +41,7 @@ private:
 	void PresentDragging();
 	void FinishMansionIntro();
 	void TravelToForest();
+	void OpenForestLevel();
 	void PlayIntroDialogueStep();
 	void AdvanceIntroDialogue();
 	void PlayTemporaryDialogue(const TCHAR* SoundPath, const FText& Speaker, const FText& Line);

@@ -17,6 +17,7 @@ namespace SOTMUIEffectsPrivate
 		TWeakObjectPtr<UWidget> Widget;
 		FTimerHandle TimerHandle;
 		float Elapsed = 0.0f;
+		double LastSeconds = -1.0;
 		float Duration = 0.22f;
 		FVector2D PeakOffset = FVector2D(14.0f, 14.0f);
 	};
@@ -34,7 +35,10 @@ namespace SOTMUIEffectsPrivate
 			return;
 		}
 
-		State->Elapsed += 1.0f / 60.0f;
+		// Real elapsed time (frame-rate independent).
+		const double NowSeconds = FPlatformTime::Seconds();
+		State->Elapsed += State->LastSeconds < 0.0 ? 0.0f : static_cast<float>(FMath::Min(NowSeconds - State->LastSeconds, 0.1));
+		State->LastSeconds = NowSeconds;
 		const float Alpha = FMath::Clamp(State->Elapsed / State->Duration, 0.0f, 1.0f);
 
 		// Out-and-back: peak displacement (down-right) at the midpoint, eased back to zero by the end.
