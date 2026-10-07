@@ -6,6 +6,7 @@
 #include "Components/TextBlock.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "Engine/GameInstance.h"
+#include "Animation/WidgetAnimation.h"
 #include "InputCoreTypes.h"
 #include "SOTMPlayerStateSubsystem.h"
 
@@ -13,6 +14,7 @@ void USOTMUpgradeStationWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	SetIsFocusable(true);
+	bClosing = false;
 	PlayerState = GetGameInstance() ? GetGameInstance()->GetSubsystem<USOTMPlayerStateSubsystem>() : nullptr;
 	ObjectiveState = GetGameInstance() ? GetGameInstance()->GetSubsystem<USOTMObjectiveSubsystem>() : nullptr;
 	if (PlayerState)
@@ -202,6 +204,31 @@ FText USOTMUpgradeStationWidget::GetLightningRequirementText() const
 
 void USOTMUpgradeStationWidget::HandleCloseClicked()
 {
+	if (bClosing)
+	{
+		return;
+	}
+	if (NewAnimation)
+	{
+		bClosing = true;
+		FWidgetAnimationDynamicEvent Finished;
+		Finished.BindDynamic(this, &ThisClass::HandleCloseAnimationFinished);
+		BindToAnimationFinished(NewAnimation, Finished);
+		PlayAnimationReverse(NewAnimation, 1.0f);
+		return;
+	}
+	FinishClose();
+}
+
+void USOTMUpgradeStationWidget::HandleCloseAnimationFinished()
+{
+	UnbindAllFromAnimationFinished(NewAnimation);
+	FinishClose();
+}
+
+void USOTMUpgradeStationWidget::FinishClose()
+{
+	bClosing = true;
 	if (UWorld* World = GetWorld())
 	{
 		if (USOTMDemoPhase3WorldSubsystem* Phase3 = World->GetSubsystem<USOTMDemoPhase3WorldSubsystem>())

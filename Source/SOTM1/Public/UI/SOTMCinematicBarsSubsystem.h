@@ -41,6 +41,12 @@ private:
 	void AddWidget();
 	void RemoveWidget();
 
+	/** Cine/other cameras with a constrained aspect ratio make black bars at the LEFT and RIGHT (pillarbox).
+	 *  During any cinematic every camera is switched to fill the whole screen. */
+	void FillScreenWithCameras();
+	bool SweepTick(float DeltaTime);
+	FTSTicker::FDelegateHandle SweepHandle;
+
 	TWeakObjectPtr<USOTMPlayerStateSubsystem> BoundPlayerState;
 	TSharedPtr<SWidget> Root;
 	TSharedPtr<float> Amount;

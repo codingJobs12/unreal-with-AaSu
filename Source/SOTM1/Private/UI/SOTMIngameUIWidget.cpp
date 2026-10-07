@@ -25,6 +25,8 @@
 #include "Ability/SOTMPhase3Settings.h"
 #include "Demo/SOTMDemoPhase4WorldSubsystem.h"
 #include "Gate/SOTMKeyGateActor.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "UI/SOTMPlayerHealthBarWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
@@ -197,6 +199,8 @@ void USOTMIngameUIWidget::NativeConstruct()
 		BoundPlayerState->OnInputLocksChanged.AddDynamic(this, &ThisClass::HandleInputLocksChanged);
 		BoundPlayerState->OnPhase4ProgressChanged.RemoveDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
 		BoundPlayerState->OnPhase4ProgressChanged.AddDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
+		BoundPlayerState->OnIsabelGateProgressChanged.RemoveDynamic(this, &ThisClass::HandleIsabelGateProgressForHUD);
+		BoundPlayerState->OnIsabelGateProgressChanged.AddDynamic(this, &ThisClass::HandleIsabelGateProgressForHUD);
 
 		RefreshCoinCounter(
 			BoundPlayerState->GetAvailableCoins(),
@@ -321,6 +325,7 @@ void USOTMIngameUIWidget::NativeDestruct()
 		BoundPlayerState->OnGameOver.RemoveDynamic(this, &ThisClass::HandleGameOver);
 		BoundPlayerState->OnInputLocksChanged.RemoveDynamic(this, &ThisClass::HandleInputLocksChanged);
 		BoundPlayerState->OnPhase4ProgressChanged.RemoveDynamic(this, &ThisClass::HandlePhase4ProgressChanged);
+		BoundPlayerState->OnIsabelGateProgressChanged.RemoveDynamic(this, &ThisClass::HandleIsabelGateProgressForHUD);
 	}
 	BoundPlayerState = nullptr;
 	if (BoundObjectiveState)
@@ -543,9 +548,16 @@ void USOTMIngameUIWidget::RefreshObjectivePresentation(const FSOTMObjectiveData&
 	{
 		SpeedBoostPanel->SetVisibility(ForestHUDVisibility);
 	}
+	const bool bGateAlreadyUnlocked = BoundPlayerState &&
+		(BoundPlayerState->IsIsabelGateUnlocked() || BoundPlayerState->IsPhase4GateUnlocked());
 	if (GateKeyPanel)
 	{
-		GateKeyPanel->SetVisibility(ForestHUDVisibility);
+		// The key has been used on the gate: the key panel is gone for good.
+		GateKeyPanel->SetVisibility(bGateAlreadyUnlocked ? ESlateVisibility::Collapsed : ForestHUDVisibility);
+	}
+	if (bGateAlreadyUnlocked)
+	{
+		ApplyGateUnlockedHUD();
 	}
 	if (CurrentObjectiveSection)
 	{
@@ -728,6 +740,56 @@ void USOTMIngameUIWidget::HideForestHealthPresentation()
 		if (Widget && Widget->GetName().Contains(TEXT("Health"), ESearchCase::IgnoreCase))
 		{
 			Widget->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+}
+
+void USOTMIngameUIWidget::HandleIsabelGateProgressForHUD(const bool bReached, const bool bHasKey, const bool bUnlocked)
+{
+	(void)bReached;
+	(void)bHasKey;
+	(void)bUnlocked;
+	if (BoundObjectiveState)
+	{
+		RefreshObjectivePresentation(BoundObjectiveState->GetActiveChapterOneObjective());
+	}
+	else
+	{
+		ApplyGateUnlockedHUD();
+	}
+}
+
+void USOTMIngameUIWidget::ApplyGateUnlockedHUD()
+{
+	if (!BoundPlayerState ||
+		!(BoundPlayerState->IsIsabelGateUnlocked() || BoundPlayerState->IsPhase4GateUnlocked()))
+	{
+		return;
+	}
+	if (GateKeyPanel)
+	{
+		GateKeyPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	// Player health bar takes the bottom-right corner.
+	TArray<UUserWidget*> HealthBars;
+	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, HealthBars, USOTMPlayerHealthBarWidget::StaticClass(), false);
+	for (UUserWidget* Bar : HealthBars)
+	{
+		if (!Bar)
+		{
+			continue;
+		}
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Bar->Slot))
+		{
+			CanvasSlot->SetAnchors(FAnchors(1.0f, 1.0f, 1.0f, 1.0f));
+			CanvasSlot->SetAlignment(FVector2D(1.0f, 1.0f));
+			CanvasSlot->SetPosition(FVector2D(-8.0f, -40.0f));
+		}
+		else if (Bar->IsInViewport())
+		{
+			Bar->SetAnchorsInViewport(FAnchors(1.0f, 1.0f, 1.0f, 1.0f));
+			Bar->SetAlignmentInViewport(FVector2D(1.0f, 1.0f));
+			Bar->SetPositionInViewport(FVector2D(-8.0f, -40.0f), true);
 		}
 	}
 }

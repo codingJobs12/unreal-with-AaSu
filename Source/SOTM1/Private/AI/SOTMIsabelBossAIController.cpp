@@ -1,6 +1,9 @@
 #include "AI/SOTMIsabelBossAIController.h"
 
 #include "AI/SOTMBossVitalComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "SOTMPlayerStateSubsystem.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/BlackboardData.h"
@@ -13,6 +16,7 @@ const FName ASOTMIsabelBossAIController::TargetActorKey(TEXT("TargetActor"));
 const FName ASOTMIsabelBossAIController::DistanceToTargetKey(TEXT("DistanceToTarget"));
 const FName ASOTMIsabelBossAIController::CanSeeTargetKey(TEXT("CanSeeTarget"));
 const FName ASOTMIsabelBossAIController::HealthPercentKey(TEXT("HealthPercent"));
+const FName ASOTMIsabelBossAIController::IsPlayerDeadKey(TEXT("IsPlayerDead"));
 
 ASOTMIsabelBossAIController::ASOTMIsabelBossAIController()
 {
@@ -62,10 +66,32 @@ void ASOTMIsabelBossAIController::OnPossess(APawn* InPawn)
 		}
 	}
 	UpdateHealthPercentFromPossessedPawn();
+
+	// Player death -> IsPlayerDead blackboard key.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USOTMPlayerStateSubsystem* PS = GI->GetSubsystem<USOTMPlayerStateSubsystem>())
+		{
+			BoundPlayerState = PS;
+			PS->OnPlayerDeathStarted.RemoveDynamic(this, &ThisClass::HandlePlayerDeathStarted);
+			PS->OnPlayerDeathStarted.AddDynamic(this, &ThisClass::HandlePlayerDeathStarted);
+			PS->OnPlayerRespawned.RemoveDynamic(this, &ThisClass::HandlePlayerRespawned);
+			PS->OnPlayerRespawned.AddDynamic(this, &ThisClass::HandlePlayerRespawned);
+			PS->OnGameOver.RemoveDynamic(this, &ThisClass::HandleGameOver);
+			PS->OnGameOver.AddDynamic(this, &ThisClass::HandleGameOver);
+			SetPlayerDead(PS->IsPlayerDead() || PS->IsGameOver());
+		}
+	}
 }
 
 void ASOTMIsabelBossAIController::OnUnPossess()
 {
+	if (USOTMPlayerStateSubsystem* PS = BoundPlayerState.Get())
+	{
+		PS->OnPlayerDeathStarted.RemoveDynamic(this, &ThisClass::HandlePlayerDeathStarted);
+		PS->OnPlayerRespawned.RemoveDynamic(this, &ThisClass::HandlePlayerRespawned);
+		PS->OnGameOver.RemoveDynamic(this, &ThisClass::HandleGameOver);
+	}
 	if (APawn* PreviousPawn = GetPawn())
 	{
 		if (USOTMBossVitalComponent* Vital = PreviousPawn->FindComponentByClass<USOTMBossVitalComponent>())
@@ -89,9 +115,9 @@ AActor* ASOTMIsabelBossAIController::GetSensedTargetActor() const
 void ASOTMIsabelBossAIController::HandlePerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
 	UBlackboardComponent* BB = GetBlackboardComponent();
-	if (!BB || !PerceptionComp)
+	if (!BB || !PerceptionComp || bPlayerDead)
 	{
-		return;
+		return; // player is dead: do not re-acquire a target
 	}
 
 	for (AActor* Actor : UpdatedActors)
@@ -152,6 +178,43 @@ void ASOTMIsabelBossAIController::UpdateHealthPercentFromPossessedPawn()
 		if (const USOTMBossVitalComponent* Vital = MyPawn->FindComponentByClass<USOTMBossVitalComponent>())
 		{
 			BB->SetValueAsFloat(HealthPercentKey, Vital->GetHealthNormalized());
+		}
+	}
+}
+
+void ASOTMIsabelBossAIController::HandlePlayerDeathStarted(AActor* /*PlayerActor*/)
+{
+	SetPlayerDead(true);
+}
+
+void ASOTMIsabelBossAIController::HandlePlayerRespawned(AActor* /*PlayerActor*/)
+{
+	SetPlayerDead(false);
+}
+
+void ASOTMIsabelBossAIController::HandleGameOver()
+{
+	SetPlayerDead(true);
+}
+
+void ASOTMIsabelBossAIController::SetPlayerDead(const bool bDead)
+{
+	bPlayerDead = bDead;
+	UBlackboardComponent* BB = GetBlackboardComponent();
+	if (!BB)
+	{
+		return;
+	}
+	BB->SetValueAsBool(IsPlayerDeadKey, bDead);
+	if (bDead)
+	{
+		// Forget the player so the tree stops fighting and can send her home.
+		BB->ClearValue(TargetActorKey);
+		BB->SetValueAsBool(CanSeeTargetKey, false);
+		StopMovement();
+		if (PerceptionComp)
+		{
+			PerceptionComp->ForgetAll();
 		}
 	}
 }

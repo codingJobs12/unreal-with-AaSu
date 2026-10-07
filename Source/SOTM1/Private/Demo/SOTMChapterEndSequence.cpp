@@ -15,6 +15,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SceneComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -436,6 +437,20 @@ void ASOTMChapterEndSequence::PlayChapterEnd(AActor* IsabellaActor)
 	LockPlayer();
 	HideHud();
 
+	// Low health: the SpotLight inside BP_Isabel fades in smoothly (0 -> 8) while the sequence starts
+	// (no delay), and reaches 10 right before the camera leaves Isabella (see StepFreezeIsabel).
+	StartIsabelSpotLight();
+	ContinueChapterEnd(); // no delay: the sequence starts exactly as before
+}
+
+void ASOTMChapterEndSequence::ContinueChapterEnd()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	// The player is no longer in the scene: invisible and non-colliding (view target is Isabella's camera).
 	if (APlayerController* PlayerPC = World->GetFirstPlayerController())
 	{
@@ -655,7 +670,9 @@ void ASOTMChapterEndSequence::StepFreezeIsabel()
 	}
 	bMontageDone = true;
 
-	// Isabella's death animation is over: swing the camera straight to Timmy's spot, then he appears.
+	// Isabella's death animation is over: the spotlight reaches its peak just before the camera moves on.
+	BoostIsabelSpotLight();
+	// Swing the camera straight to Timmy's spot, then he appears.
 	{
 		FVector FocusSpot = GetActorLocation();
 		if (TimmySpawnPoint)
@@ -1936,4 +1953,86 @@ void ASOTMChapterEndSequence::Tick(const float DeltaSeconds)
 		}
 		Camera->SetWorldLocationAndRotation(CamCurLoc + ShakeOffset, (CamCurRot * ShakeRot).Rotator());
 	}
+}
+
+void ASOTMChapterEndSequence::StartIsabelSpotLight()
+{
+	USpotLightComponent* Spot = nullptr;
+	if (Isabella)
+	{
+		TArray<USpotLightComponent*> Spots;
+		Isabella->GetComponents<USpotLightComponent>(Spots, true);
+		for (USpotLightComponent* Candidate : Spots)
+		{
+			if (Candidate)
+			{
+				Spot = Candidate;
+				break;
+			}
+		}
+	}
+	if (!Spot)
+	{
+		UE_LOG(LogSOTMChapterEnd, Warning, TEXT("Chapter End: no SpotLight component found on Isabella (%s)."), *GetNameSafe(Isabella));
+		return;
+	}
+	IsabelSpot = Spot;
+	// A static light can't change at runtime: make sure it is movable, switched on and visible.
+	if (Spot->Mobility != EComponentMobility::Movable)
+	{
+		Spot->SetMobility(EComponentMobility::Movable);
+	}
+	Spot->SetActive(true);
+	Spot->SetHiddenInGame(false);
+	Spot->SetVisibility(true, true);
+	Spot->SetIntensity(0.0f);
+	UE_LOG(LogSOTMChapterEnd, Display, TEXT("Chapter End: SpotLight '%s' fading in to %.1f over %.2fs."),
+		*Spot->GetName(), SpotLightMainIntensity, SpotLightRampSeconds);
+
+	TWeakObjectPtr<USpotLightComponent> WeakSpot(Spot);
+	const float Ramp = FMath::Max(SpotLightRampSeconds, 0.01f);
+	const float MainIntensity = SpotLightMainIntensity;
+	float Elapsed = 0.0f;
+	FTSTicker::GetCoreTicker().RemoveTicker(SpotTickerHandle);
+	SpotTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[WeakSpot, Ramp, MainIntensity, Elapsed](float Dt) mutable
+	{
+		USpotLightComponent* Light = WeakSpot.Get();
+		if (!Light)
+		{
+			return false;
+		}
+		Elapsed += FMath::Min(Dt, 0.1f);
+		const float A = FMath::Clamp(Elapsed / Ramp, 0.0f, 1.0f);
+		Light->SetIntensity(MainIntensity * (A * A * A * (A * (A * 6.0f - 15.0f) + 10.0f))); // smootherstep
+		return A < 1.0f;
+	}));
+}
+
+void ASOTMChapterEndSequence::BoostIsabelSpotLight()
+{
+	USpotLightComponent* Spot = IsabelSpot.Get();
+	if (!Spot)
+	{
+		return;
+	}
+	TWeakObjectPtr<USpotLightComponent> WeakSpot(Spot);
+	const float From = Spot->Intensity;
+	const float To = SpotLightPeakIntensity;
+	const float Duration = FMath::Max(SpotLightPeakSeconds, 0.01f);
+	float Elapsed = 0.0f;
+	FTSTicker::GetCoreTicker().RemoveTicker(SpotTickerHandle);
+	SpotTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[WeakSpot, From, To, Duration, Elapsed](float Dt) mutable
+	{
+		USpotLightComponent* Light = WeakSpot.Get();
+		if (!Light)
+		{
+			return false;
+		}
+		Elapsed += FMath::Min(Dt, 0.1f);
+		const float A = FMath::Clamp(Elapsed / Duration, 0.0f, 1.0f);
+		Light->SetIntensity(FMath::Lerp(From, To, A * A * (3.0f - 2.0f * A)));
+		return A < 1.0f;
+	}));
 }

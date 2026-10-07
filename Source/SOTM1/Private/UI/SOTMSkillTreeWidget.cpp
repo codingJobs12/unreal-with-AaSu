@@ -16,6 +16,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Demo/SOTMDemoPhase3WorldSubsystem.h"
 #include "Engine/GameInstance.h"
+#include "Animation/WidgetAnimation.h"
 #include "InputCoreTypes.h"
 #include "SOTMPlayerStateSubsystem.h"
 
@@ -83,6 +84,7 @@ void USOTMSkillTreeWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	SetIsFocusable(true);
+	bClosing = false;
 	PlayerState = GetGameInstance() ? GetGameInstance()->GetSubsystem<USOTMPlayerStateSubsystem>() : nullptr;
 	RefreshAllNodes();
 	SetKeyboardFocus();
@@ -109,6 +111,31 @@ FReply USOTMSkillTreeWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
 
 void USOTMSkillTreeWidget::HandleCloseClicked()
 {
+	if (bClosing)
+	{
+		return;
+	}
+	if (NewAnimation)
+	{
+		bClosing = true;
+		FWidgetAnimationDynamicEvent Finished;
+		Finished.BindDynamic(this, &ThisClass::HandleCloseAnimationFinished);
+		BindToAnimationFinished(NewAnimation, Finished);
+		PlayAnimationReverse(NewAnimation, 1.0f);
+		return;
+	}
+	FinishClose();
+}
+
+void USOTMSkillTreeWidget::HandleCloseAnimationFinished()
+{
+	UnbindAllFromAnimationFinished(NewAnimation);
+	FinishClose();
+}
+
+void USOTMSkillTreeWidget::FinishClose()
+{
+	bClosing = true;
 	if (UWorld* World = GetWorld())
 	{
 		if (USOTMDemoPhase3WorldSubsystem* Phase3 = World->GetSubsystem<USOTMDemoPhase3WorldSubsystem>())

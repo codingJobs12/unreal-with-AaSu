@@ -9,6 +9,7 @@ class UAISenseConfig_Sight;
 class UBehaviorTree;
 class UBlackboardData;
 class USOTMBossVitalComponent;
+class USOTMPlayerStateSubsystem;
 
 /**
  * New, separate AI Controller for a Behavior-Tree-driven Isabel boss fight.
@@ -25,6 +26,9 @@ class USOTMBossVitalComponent;
  *   CanSeeTarget       (Bool)                       - set automatically from AI Perception
  *   DistanceToTarget   (Float)                       - kept updated by UBTService_UpdateIsabelBlackboard
  *   HealthPercent      (Float, 0-1)                    - kept updated by this controller + the service
+ *   IsPlayerDead       (Bool)                          - TRUE while the player is dead / respawning / game over
+ *                                                       (also clears TargetActor + CanSeeTarget and stops her).
+ *                                                       Use it in the tree to send Isabella back home to stand.
  */
 UCLASS(Blueprintable)
 class SOTM1_API ASOTMIsabelBossAIController : public AAIController
@@ -41,6 +45,7 @@ public:
 	static const FName DistanceToTargetKey;
 	static const FName CanSeeTargetKey;
 	static const FName HealthPercentKey;
+	static const FName IsPlayerDeadKey;
 
 	UFUNCTION(BlueprintPure, Category="SOTM|Isabel|Boss AI")
 	AActor* GetSensedTargetActor() const;
@@ -77,4 +82,18 @@ private:
 	void HandleTargetHealthChanged(USOTMBossVitalComponent* VitalComponent, float PreviousHealth, float CurrentHealth, float MaximumHealth);
 
 	void UpdateHealthPercentFromPossessedPawn();
+
+	UFUNCTION()
+	void HandlePlayerDeathStarted(AActor* PlayerActor);
+
+	UFUNCTION()
+	void HandlePlayerRespawned(AActor* PlayerActor);
+
+	UFUNCTION()
+	void HandleGameOver();
+
+	void SetPlayerDead(bool bDead);
+
+	TWeakObjectPtr<USOTMPlayerStateSubsystem> BoundPlayerState;
+	bool bPlayerDead = false;
 };

@@ -139,6 +139,18 @@ private:
 	UFUNCTION()
 	void HandleCloseClicked();
 
+	/** Plays NewAnimation in reverse (if the widget has it), then closes. */
+	UFUNCTION()
+	void HandleCloseAnimationFinished();
+
+	void FinishClose();
+
+	/** "NewAnimation" from the widget Blueprint - played forward on open (by the BP) and in reverse on close. */
+	UPROPERTY(Transient, BlueprintReadOnly, Category="Animation", meta=(BindWidgetAnimOptional, AllowPrivateAccess="true"))
+	TObjectPtr<class UWidgetAnimation> NewAnimation;
+
+	bool bClosing = false;
+
 	UFUNCTION()
 	void HandleConfirmUpgradeClicked();
 

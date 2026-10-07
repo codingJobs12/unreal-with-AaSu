@@ -261,6 +261,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Camera")
 	float CameraBlendTime = 1.0f;
 
+	// ---- Isabella's SpotLight (low health) ----
+	/** Seconds the BP_Isabel SpotLight takes to fade smoothly from 0 up to SpotLightMainIntensity. */
+	UPROPERTY(EditAnywhere, Category="Spot Light", meta=(ClampMin="0.0"))
+	float SpotLightRampSeconds = 1.6f;
+
+	UPROPERTY(EditAnywhere, Category="Spot Light")
+	float SpotLightMainIntensity = 8.0f;
+
+	/** Intensity reached right before the camera switches to Isabella. */
+	UPROPERTY(EditAnywhere, Category="Spot Light")
+	float SpotLightPeakIntensity = 10.0f;
+
+	/** Seconds spent going from the main to the peak intensity, just before the camera switch. */
+	UPROPERTY(EditAnywhere, Category="Spot Light", meta=(ClampMin="0.0"))
+	float SpotLightPeakSeconds = 0.35f;
+
 	// ---- Timing (seconds) ----
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Timing")
 	float DelayBeforeTimmyAppears = 1.0f;
@@ -386,6 +402,11 @@ private:
 	TSharedPtr<class SWidget> BarsRoot;
 	TSharedPtr<float> BarsAmount;
 	FTSTicker::FDelegateHandle BarsTickerHandle;
+	FTSTicker::FDelegateHandle SpotTickerHandle;
+	void ContinueChapterEnd();
+	void StartIsabelSpotLight();
+	void BoostIsabelSpotLight();
+	TWeakObjectPtr<class USpotLightComponent> IsabelSpot;
 public:
 
 private:

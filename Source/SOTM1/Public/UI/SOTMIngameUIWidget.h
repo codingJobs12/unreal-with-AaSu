@@ -101,6 +101,12 @@ private:
 	void HandleCousinWarningChanged(bool bVisible);
 
 	UFUNCTION()
+	void HandleIsabelGateProgressForHUD(bool bReached, bool bHasKey, bool bUnlocked);
+
+	/** Once the gate has been unlocked: key panel is hidden and the player health bar moves bottom-right. */
+	void ApplyGateUnlockedHUD();
+
+	UFUNCTION()
 	void HandleStationPromptChanged(bool bVisible);
 
 	UFUNCTION()

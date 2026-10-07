@@ -36,6 +36,7 @@
 #include "TimerManager.h"
 #include "UI/SOTMDemoCompleteWidget.h"
 #include "UnrealClient.h"
+#include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSOTMPhase4, Log, All);
 
@@ -286,6 +287,9 @@ void USOTMDemoPhase4WorldSubsystem::UnbindProductionInput()
 
 void USOTMDemoPhase4WorldSubsystem::HandleInteractInput()
 {
+	UE_LOG(LogSOTMPhase4, Verbose, TEXT("Interact pressed: nearChest=%d nearGate=%d chestOpen=%d hasKey=%d dialogue=%d"),
+		bNearChest, bNearGate, PlayerState && PlayerState->IsPhase4ChestOpened(),
+		PlayerState && PlayerState->HasPhase4GateKey(), bChestDialogueActive);
 	if (!PlayerState || PlayerState->IsPlayerDead() || PlayerState->IsGameOver() || DemoCompleteWidget || bChestDialogueActive || bIsabelCutsceneActive)
 	{
 		return;
@@ -1245,6 +1249,13 @@ void USOTMDemoPhase4WorldSubsystem::EndChestDialogue()
 		else
 		{
 			PC->SetInputMode(FInputModeGameOnly());
+		}
+		// The cutscene ran in UI-only mode: hand keyboard focus back to the game viewport and
+		// drop any stale key state, otherwise the FIRST E press afterwards is swallowed.
+		PC->FlushPressedKeys();
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().SetUserFocusToGameViewport(0);
 		}
 	}
 	if (PlayerState && bChestDialogueInputLockHeld)

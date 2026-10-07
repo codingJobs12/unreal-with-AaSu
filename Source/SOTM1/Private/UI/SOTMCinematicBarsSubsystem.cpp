@@ -1,6 +1,8 @@
 #include "UI/SOTMCinematicBarsSubsystem.h"
 
+#include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
+#include "UObject/UObjectIterator.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Styling/CoreStyle.h"
@@ -32,6 +34,7 @@ void USOTMCinematicBarsSubsystem::Deinitialize()
 		PS->OnInputLocksChanged.RemoveDynamic(this, &ThisClass::HandleInputLocksChanged);
 	}
 	FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
+	FTSTicker::GetCoreTicker().RemoveTicker(SweepHandle);
 	RemoveWidget();
 	Super::Deinitialize();
 }
@@ -52,6 +55,13 @@ void USOTMCinematicBarsSubsystem::SetBarsVisible(const bool bVisible)
 	if (bVisible)
 	{
 		AddWidget();
+		FillScreenWithCameras();
+		// Cameras can be spawned or switched during the sequence: keep sweeping while it lasts.
+		if (!SweepHandle.IsValid())
+		{
+			SweepHandle = FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateUObject(this, &USOTMCinematicBarsSubsystem::SweepTick), 0.2f);
+		}
 	}
 	if (!TickHandle.IsValid())
 	{
@@ -116,4 +126,33 @@ void USOTMCinematicBarsSubsystem::RemoveWidget()
 	}
 	Root.Reset();
 	Amount.Reset();
+}
+
+void USOTMCinematicBarsSubsystem::FillScreenWithCameras()
+{
+	const UWorld* GameWorld = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+	if (!GameWorld)
+	{
+		return;
+	}
+	for (TObjectIterator<UCameraComponent> It; It; ++It)
+	{
+		UCameraComponent* Camera = *It;
+		if (Camera && !Camera->HasAnyFlags(RF_ClassDefaultObject) && Camera->GetWorld() == GameWorld
+			&& Camera->bConstrainAspectRatio)
+		{
+			Camera->bConstrainAspectRatio = false; // no side bars: fill the whole screen
+		}
+	}
+}
+
+bool USOTMCinematicBarsSubsystem::SweepTick(float /*DeltaTime*/)
+{
+	if (!bWanted)
+	{
+		SweepHandle.Reset();
+		return false;
+	}
+	FillScreenWithCameras();
+	return true;
 }
